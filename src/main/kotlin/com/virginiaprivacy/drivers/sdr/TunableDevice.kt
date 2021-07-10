@@ -12,7 +12,7 @@ interface TunableDevice {
     var freq: Long
     var rate: Int
     var directSampling: Boolean
-    var bandwidth: Int
+    var bandwidth: Long
 
     fun rtlXtal(): Int = config.xtal
 
@@ -20,7 +20,7 @@ interface TunableDevice {
 
     fun getXtalFreq() = (((this.rtlXtal()) * (1.0 + this.ppmCorrection / 1e6)))
 
-    fun setBW(bw: Int)
+    fun setBW(bw: Long)
 
     fun setFrequency(freq: Int)
 

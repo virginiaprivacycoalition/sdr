@@ -7,11 +7,11 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import java.io.Closeable
 import java.io.IOException
-import java.math.BigInteger
 import java.nio.ByteBuffer
 import java.util.concurrent.Executors
 import kotlin.experimental.or
 import kotlin.math.pow
+import kotlin.math.roundToLong
 
 @ExperimentalCoroutinesApi
 @ExperimentalStdlibApi
@@ -61,12 +61,6 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace) : Clo
 
     private val buffer = List(bufferSize) {
         ByteArray(DEFAULT_BUF_LENGTH)
-    }
-
-    init {
-        buffer.forEachIndexed { index, bytes ->
-            usbDevice.prepareNewBulkTransfer(index, ByteBuffer.allocateDirect(bufferSize))
-        }
     }
 
     fun setFrequency(freq: Int) {
@@ -228,17 +222,17 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace) : Clo
             fir[8 + i * 3 / 2] = (first shr 4).toUInt()
             fir[8 + i * 3 / 2 + 1] =
                 ((first shl 4) or (((second shr 8) and 0x0f))).toUInt()
-            fir[8 + i * 3 / 2 + 2] = first.toUInt()
+            fir[8 + i * 3 / 2 + 2] = second.toUInt()
         }
 
-        fir.filterNot { it == 0u }.forEach { i ->
+        fir.filterNot { it == 0u }.forEachIndexed { index, i ->
             if (i == null) {
                 throw (RuntimeException("i is null?!? $i"))
             }
             if (i.toInt() < 0) {
                 println(fir.asList())
             }
-            demodWriteReg(1, 0x1c + i.toInt(), i.toInt(), 1)
+            demodWriteReg(1, 0x1c + index, i.toInt(), 1)
         }
     }
 
@@ -338,23 +332,6 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace) : Clo
         runningPlugins.add(plugin)
     }
 
-//    private suspend fun requestToBytes(
-//        transferIndex: Int
-//    )  {
-//        if (transferIndex >= 0 && transferIndex <= bufferArray.size) {
-//        val buf = bufferArray[transferIndex]
-//            val bytes = ByteArray(buf.position())
-//            buf.rewind()
-//            buf.get(bytes)
-//            buf.clear()
-//            bytesRead.addAndGet(bytes.size.toLong())
-//
-//            usbDevice.submitBulkTransfer(transferIndex, buf)
-//        } else {
-//            throw IOException("Invalid transferIndex of $transferIndex")
-//        }
-//    }
-
     private fun readAsync() {
         Status.startTime = System.currentTimeMillis()
         Status.bytesRead = 0
@@ -430,7 +407,7 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace) : Clo
         return r
     }
 
-    fun setSampleRate(rate: Int) {
+    fun setSampleRate(rate: Int): Int {
         var r = 0
         var rsampRatio = 0
         var realRsampRatio = 0
@@ -444,6 +421,21 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace) : Clo
         realRsampRatio = rsampRatio or ((rsampRatio and 0x08000000) shl 1)
         realRate = (tunableDevice!!.rtlXtal() * 2.0.pow(22) / realRsampRatio)
         println("Exact sample rate set to ${realRate}Hz")
+        tunableDevice?.let {
+            setI2cRepeater(1)
+            it.setBW(if (it.bandwidth != 0L) it.bandwidth else realRate.toLong())
+            setI2cRepeater(0)
+        }
+        var tmp = rsampRatio shr 16
+        r = (r or demodWriteReg(1, 0x9f, tmp, 2))
+        tmp = rsampRatio and 0xffff
+        r = (r or demodWriteReg(1, 0xa1, tmp, 2))
+        r = (r or setSampleFrequencyCorrection(tunableDevice!!.ppmCorrection))
+
+        r = (r or demodWriteReg(1, 0x01, 0x14, 1))
+        r = (r or demodWriteReg(1, 0x01, 0x10, 1))
+
+        return r
         //dev.rate = realRate.roundToInt()
     }
 

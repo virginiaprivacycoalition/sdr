@@ -30,7 +30,7 @@ private val usbIFace: UsbIFace) : TunableDevice, I2C {
     override var freq: Long = 0
     override var rate: Int = 0
     override var directSampling: Boolean = false
-    override var bandwidth: Int = 0
+    override var bandwidth: Long = 0
 
 
     private var delsys: R82xxDeliverySystem? = null
@@ -308,7 +308,7 @@ private val usbIFace: UsbIFace) : TunableDevice, I2C {
         writeRegMask(0x1f, ltAtt, 0x80)
         writeRegMask(0x0f, fltExtWidest, 0x80)
         writeRegMask(0x19, polyfilCur, 0x60)
-        this.bandwidth = bw
+        this.bandwidth = bw.toLong()
         this.delsys = R82xxDeliverySystem.values()[delsys.toInt()]
         this.r82xxTunerType = r82xxTunerType
     }
@@ -434,7 +434,7 @@ private val usbIFace: UsbIFace) : TunableDevice, I2C {
         }
     }
 
-    override fun setBW(bw: Int) {
+    override fun setBW(bw: Long) {
         var realBw = 0
         var i = 0.toUInt()
         var mutableBW = bw
