@@ -7,11 +7,11 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import java.io.Closeable
 import java.io.IOException
-import java.math.BigInteger
 import java.nio.ByteBuffer
 import java.util.concurrent.Executors
 import kotlin.experimental.or
 import kotlin.math.pow
+import kotlin.math.roundToLong
 
 @ExperimentalCoroutinesApi
 @ExperimentalStdlibApi
@@ -430,7 +430,7 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace) : Clo
         return r
     }
 
-    fun setSampleRate(rate: Int) {
+    fun setSampleRate(rate: Int): Int {
         var r = 0
         var rsampRatio = 0
         var realRsampRatio = 0
@@ -444,6 +444,21 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace) : Clo
         realRsampRatio = rsampRatio or ((rsampRatio and 0x08000000) shl 1)
         realRate = (tunableDevice!!.rtlXtal() * 2.0.pow(22) / realRsampRatio)
         println("Exact sample rate set to ${realRate}Hz")
+        tunableDevice?.let {
+            setI2cRepeater(1)
+            it.setBW(if (it.bandwidth != 0L) it.bandwidth else realRate.toLong())
+            setI2cRepeater(0)
+        }
+        var tmp = rsampRatio shr 16
+        r = (r or demodWriteReg(1, 0x9f, tmp, 2))
+        tmp = rsampRatio and 0xffff
+        r = (r or demodWriteReg(1, 0xa1, tmp, 2))
+        r = (r or setSampleFrequencyCorrection(tunableDevice!!.ppmCorrection))
+
+        r = (r or demodWriteReg(1, 0x01, 0x14, 1))
+        r = (r or demodWriteReg(1, 0x01, 0x10, 1))
+
+        return r
         //dev.rate = realRate.roundToInt()
     }
 

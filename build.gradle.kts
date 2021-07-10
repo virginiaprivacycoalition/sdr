@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "com.virginiaprivacy"
-version = "0.0.8"
+version = "0.0.9"
 
 repositories {
     mavenCentral()
