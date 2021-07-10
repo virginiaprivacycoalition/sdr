@@ -63,12 +63,6 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace) : Clo
         ByteArray(DEFAULT_BUF_LENGTH)
     }
 
-    init {
-        buffer.forEachIndexed { index, bytes ->
-            usbDevice.prepareNewBulkTransfer(index, ByteBuffer.allocateDirect(bufferSize))
-        }
-    }
-
     fun setFrequency(freq: Int) {
         tunableDevice?.setFrequency(freq)
     }
@@ -228,17 +222,17 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace) : Clo
             fir[8 + i * 3 / 2] = (first shr 4).toUInt()
             fir[8 + i * 3 / 2 + 1] =
                 ((first shl 4) or (((second shr 8) and 0x0f))).toUInt()
-            fir[8 + i * 3 / 2 + 2] = first.toUInt()
+            fir[8 + i * 3 / 2 + 2] = second.toUInt()
         }
 
-        fir.filterNot { it == 0u }.forEach { i ->
+        fir.filterNot { it == 0u }.forEachIndexed { index, i ->
             if (i == null) {
                 throw (RuntimeException("i is null?!? $i"))
             }
             if (i.toInt() < 0) {
                 println(fir.asList())
             }
-            demodWriteReg(1, 0x1c + i.toInt(), i.toInt(), 1)
+            demodWriteReg(1, 0x1c + index, i.toInt(), 1)
         }
     }
 
@@ -337,23 +331,6 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace) : Clo
         plugin.run()
         runningPlugins.add(plugin)
     }
-
-//    private suspend fun requestToBytes(
-//        transferIndex: Int
-//    )  {
-//        if (transferIndex >= 0 && transferIndex <= bufferArray.size) {
-//        val buf = bufferArray[transferIndex]
-//            val bytes = ByteArray(buf.position())
-//            buf.rewind()
-//            buf.get(bytes)
-//            buf.clear()
-//            bytesRead.addAndGet(bytes.size.toLong())
-//
-//            usbDevice.submitBulkTransfer(transferIndex, buf)
-//        } else {
-//            throw IOException("Invalid transferIndex of $transferIndex")
-//        }
-//    }
 
     private fun readAsync() {
         Status.startTime = System.currentTimeMillis()

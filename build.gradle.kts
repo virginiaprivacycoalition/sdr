@@ -27,7 +27,7 @@ publishing {
         create<MavenPublication>("release") {
             group = "com.virginiaprivacy.adsbtrack.drivers"
             artifactId = "sdr"
-            version = "1.0.0"
+            version = "0.0.9"
             from(components["java"])
         }
     }
