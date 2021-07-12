@@ -436,7 +436,7 @@ private val usbIFace: UsbIFace) : TunableDevice, I2C {
 
     override fun setBW(bw: Long) {
         var realBw = 0
-        var i = 0.toUInt()
+        var i = 0
         var mutableBW = bw
         var reg0a = 0
         var reg0b = 0
@@ -473,11 +473,14 @@ private val usbIFace: UsbIFace) : TunableDevice, I2C {
                 reg0b = reg0b or 0x40
             }
 
-            i = IF_LOWPASS_BANDWIDTH_TABLE.indexOf(IF_LOWPASS_BANDWIDTH_TABLE.first { mutableBW > it })
-                .toUInt()
+            for (it in IF_LOWPASS_BANDWIDTH_TABLE) {
+                i++
+                if (bw > it)
+                    break
+            }
             --i
-            reg0b = reg0b or (15 - i.toInt())
-            realBw += IF_LOWPASS_BANDWIDTH_TABLE[i.toInt()]
+            reg0b = reg0b or (15 - i)
+            realBw += IF_LOWPASS_BANDWIDTH_TABLE[i]
             this.freq -= realBw / 2
         }
         writeRegMask(10, reg0a, 16)
