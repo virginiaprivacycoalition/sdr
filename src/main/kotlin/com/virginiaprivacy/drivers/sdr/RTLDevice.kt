@@ -9,6 +9,7 @@ import java.io.Closeable
 import java.io.IOException
 import java.nio.ByteBuffer
 import java.util.concurrent.Executors
+import kotlin.experimental.and
 import kotlin.experimental.or
 import kotlin.math.pow
 import kotlin.math.roundToLong
@@ -173,6 +174,69 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace) : Clo
         return (data[1].toInt() shl 8) or data[0].toInt()
     }
 
+    fun demodWriteReg(page: Int, address: Int, value: Short, length: Int): Int {
+        val data = UByteArray(2)
+
+        val index = 16 or page
+
+        val realAddress = (address shl 8) or 32
+
+
+        if (length == 1) {
+            data[0] = (value and 0xff).toUByte()
+        } else {
+            data[0] = (value shr 8).toUByte()
+        }
+        data[1] = (value and 0xff).toUByte()
+        val result = usbDevice.controlTransfer(
+            CTRL_OUT,
+            0,
+            realAddress,
+            index,
+            data.toByteArray(),
+            length,
+            CTRL_TIMEOUT
+        )
+        checkError(result)
+        demodReadReg(0x0a, 0x01, 1)
+        return if (result == length) {
+            0
+        } else {
+            -1
+        }
+    }
+
+    fun demodWriteReg(page: Int, address: Int, value: UInt, length: Int): Int {
+        val data = UByteArray(2)
+
+        val index = 16 or page
+
+        val realAddress = (address shl 8) or 32
+
+        if (length == 1) {
+            data[0] = (value and 255u).toUByte()
+        } else {
+            data[0] = (value shr 8).toUByte()
+        }
+        data[1] = (value and 255u).toUByte()
+        val result = usbDevice.controlTransfer(
+            CTRL_OUT,
+            0,
+            realAddress,
+            index,
+            data.toByteArray(),
+            length,
+            CTRL_TIMEOUT
+        )
+        checkError(result)
+        demodReadReg(0x0a, 0x01, 1)
+        return if (result == length) {
+            0
+        } else {
+            -1
+        }
+    }
+
     fun demodWriteReg(page: Int, address: Int, value: Int, length: Int): Int {
         val data = UByteArray(2)
 
@@ -214,25 +278,23 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace) : Clo
             fir[i] = f.toUInt()
         }
         for (i in 0 until 8 step 2) {
-            val first = Companion.fir[8 + i].toInt()
-            val second = Companion.fir[8 + i + 1].toInt()
-            if (first !in -2048..2047 || second !in -2048..2047) {
+            val first = Companion.fir[8 + i].toUInt()
+            val second = Companion.fir[8 + i + 1].toUInt()
+            if (first.toInt() !in -2048..2047 || second.toInt() !in -2048..2047) {
                 throw IllegalArgumentException()
             }
             fir[8 + i * 3 / 2] = (first shr 4).toUInt()
             fir[8 + i * 3 / 2 + 1] =
-                ((first shl 4) or (((second shr 8) and 0x0f))).toUInt()
+                ((first shl 4) or (((second shr 8) and 15u))).toUInt()
             fir[8 + i * 3 / 2 + 2] = second.toUInt()
         }
 
-        fir.filterNot { it == 0u }.forEachIndexed { index, i ->
-            if (i == null) {
-                throw (RuntimeException("i is null?!? $i"))
+        fir.forEachIndexed { index, uInt ->
+            if (demodWriteReg(1, 0x1c + index, uInt.toInt(), 1) != 0) {
+                val msg = "FIR[$index]: $uInt did not return 0."
+                throw IllegalArgumentException(msg)
             }
-            if (i.toInt() < 0) {
-                println(fir.asList())
-            }
-            demodWriteReg(1, 0x1c + index, i.toInt(), 1)
+
         }
     }
 
@@ -552,4 +614,6 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace) : Clo
 
 
 }
+
+private infix fun Short.shr(i: Int): Short = (this.toInt() shr i).toShort()
 

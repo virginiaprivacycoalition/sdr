@@ -486,7 +486,7 @@ private val usbIFace: UsbIFace) : TunableDevice, I2C {
         writeRegMask(10, reg0a, 16)
         writeRegMask(11, reg0b, 239)
         this.bandwidth = mutableBW
-        println("Set bandwidth to $bandwidth")
+        println("Set bandwidth to $realBw")
     }
 
 
