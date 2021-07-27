@@ -29,7 +29,7 @@ enum class Tuner(
             values().first {
                 val i2cReadReg = device.i2cReadReg(it.i2cAddress, it.checkAddress)
                 println(i2cReadReg)
-                return@first it.checkVal == i2cReadReg
+                return@first (it.checkVal == i2cReadReg) || i2cReadReg == 0
             }
     }
 }
