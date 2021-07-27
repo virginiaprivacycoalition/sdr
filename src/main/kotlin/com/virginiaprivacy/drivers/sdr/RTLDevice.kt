@@ -4,15 +4,20 @@ import com.virginiaprivacy.drivers.sdr.data.Status
 import com.virginiaprivacy.drivers.sdr.r2xx.R82XX
 import com.virginiaprivacy.drivers.sdr.usb.UsbIFace
 import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.collect
 import java.io.Closeable
+import java.io.File
 import java.io.IOException
+import java.math.BigInteger
 import java.nio.ByteBuffer
+import java.nio.file.Files
+import java.nio.file.StandardOpenOption
 import java.util.concurrent.Executors
 import kotlin.experimental.and
 import kotlin.experimental.or
 import kotlin.math.pow
-import kotlin.math.roundToLong
+import kotlin.math.roundToInt
 
 @ExperimentalCoroutinesApi
 @ExperimentalStdlibApi
@@ -27,7 +32,7 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace) : Clo
 
     val tunerChip: Tuner by lazy { Tuner.tunerType(this) }
 
-    var tunableDevice: TunableDevice? = null
+    lateinit var tunableDevice: TunableDevice
 
     val scope = CoroutineScope(
         Executors.newSingleThreadExecutor().asCoroutineDispatcher()
@@ -37,47 +42,24 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace) : Clo
 
     val flow = MutableSharedFlow<ByteArray>(extraBufferCapacity = 12)
 
-    val requestFlow = channelFlow<ByteArray> {
-        while (ioStatus() == IOStatus.ACTIVE) {
-            for (i in 0.until(buffer.size)) {
-                usbDevice.submitBulkTransfer(i)
-                if (ioStatus() == IOStatus.ACTIVE) {
-                    val transferResult = usbDevice.waitForTransferResult()
-                    if (transferResult == null) {
-                        // Read failed
-                        Status.setIOStatus(IOStatus.EXIT)
-                        return@channelFlow
-                    }
-                    val bytes = ByteArray(transferResult.position())
-                    transferResult.rewind()
-                    transferResult.get(bytes)
-                    Status.bytesRead += bytes.size.toLong()
-                    flow.emit(bytes)
-                } else {
-                    return@channelFlow
-                }
-            }
-        }
-    }
-
     private val buffer = List(bufferSize) {
         ByteArray(DEFAULT_BUF_LENGTH)
     }
 
     fun setFrequency(freq: Int) {
-        tunableDevice?.setFrequency(freq)
+        tunableDevice.setFrequency(freq)
     }
 
     fun setGain(manualGain: Boolean, gain: Int? = null) {
-        tunableDevice?.setGain(manualGain, gain)
+        tunableDevice.setGain(manualGain, gain)
     }
 
     fun writeRegMask(reg: Int, value: Int, bitMask: Int) {
-        tunableDevice?.writeRegMask(reg, value, bitMask)
+        tunableDevice.writeRegMask(reg, value, bitMask)
     }
 
     fun writeTunerReg(reg: Int, value: Int) {
-        tunableDevice?.writeReg(reg, value)
+        tunableDevice.writeReg(reg, value)
     }
 
     private fun readByte(block: Int, address: UShort): Byte {
@@ -283,10 +265,10 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace) : Clo
             if (first.toInt() !in -2048..2047 || second.toInt() !in -2048..2047) {
                 throw IllegalArgumentException()
             }
-            fir[8 + i * 3 / 2] = (first shr 4).toUInt()
+            fir[8 + i * 3 / 2] = (first shr 4)
             fir[8 + i * 3 / 2 + 1] =
-                ((first shl 4) or (((second shr 8) and 15u))).toUInt()
-            fir[8 + i * 3 / 2 + 2] = second.toUInt()
+                ((first shl 4) or (((second shr 8) and 15u)))
+            fir[8 + i * 3 / 2 + 2] = second
         }
 
         fir.forEachIndexed { index, uInt ->
@@ -301,7 +283,7 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace) : Clo
     internal fun i2cReadReg(i2cAddress: Int, reg: Int): Int {
         val address = i2cAddress.toUShort()
         writeArray(Blocks.IICB, address, byteArrayOf(reg.toByte()), 1)
-        return readByte(Blocks.IICB, address).toInt()
+        return BigInteger(readArray(Blocks.IICB, i2cAddress, 1)).intValueExact()
     }
 
     internal fun i2cWrite(i2cAddress: Int, buffer: ByteArray, len: Int): Int {
@@ -394,19 +376,59 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace) : Clo
         runningPlugins.add(plugin)
     }
 
+    suspend fun takeSamples(secondsToSample: Int, outputFile: File) {
+        if (Status.getIOStatus().value == IOStatus.ACTIVE) {
+            throw IOException("Device is already in use")
+        }
+        val samplesToTake = secondsToSample * tunableDevice.rate
+        scope.launch { sampleAsync(samplesToTake) }
+        if (!outputFile.exists()) {
+            outputFile.createNewFile()
+        }
+        var startTime = System.currentTimeMillis()
+        val bufferedWriter = outputFile.outputStream()
+        val outputStream = Files.newOutputStream(outputFile.toPath(), StandardOpenOption.APPEND).buffered()
+        var bytesWritten = 0
+        flow.collect {
+            outputStream.write(it)
+            bytesWritten += it.size
+            if ((samplesToTake - bytesWritten) % 1000 == 0) {
+                println("${(samplesToTake - bytesWritten) / 1000 } seconds of sampling left.")
+            }
+        }
+    }
+
+    private fun sampleAsync(samples: Int) {
+        var samplesTaken = 0
+        var samplesRemaining = samples
+        scope.launch {
+            allocateBuffersAsync()
+            while (Status.getIOStatus().value == IOStatus.ACTIVE && samplesRemaining > 0) {
+                for (i in 0.until(buffer.size)) {
+                    usbDevice.submitBulkTransfer(i)
+                    val transferResult = usbDevice.waitForTransferResult()
+                    val resultSize = transferResult.position()
+                    val bytes = if (resultSize > samplesRemaining) {
+                        ByteArray(samplesRemaining.toInt())
+                    } else {
+                        ByteArray(resultSize)
+                    }
+                    transferResult.rewind()
+                    transferResult.get(bytes)
+                    flow.emit(bytes)
+                    samplesRemaining -= bytes.size
+                }
+            }
+            cancel()
+        }
+    }
+
     private fun readAsync() {
         Status.startTime = System.currentTimeMillis()
         Status.bytesRead = 0
         Status.setIOStatus(IOStatus.ACTIVE)
         scope.launch {
-            for (i in 0.until(buffer.size)) {
-                usbDevice.prepareNewBulkTransfer(
-                    i, ByteBuffer.allocateDirect(
-                        DEFAULT_BUFFER_SIZE
-                    )
-                )
-            }
-            delay(2000)
+            allocateBuffersAsync()
 
             while (ioStatus() == IOStatus.ACTIVE) {
                 for (i in 0.until(buffer.size)) {
@@ -430,6 +452,17 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace) : Clo
                 }
             }
         }
+    }
+
+    private suspend fun allocateBuffersAsync() {
+        for (i in 0.until(buffer.size)) {
+            usbDevice.prepareNewBulkTransfer(
+                i, ByteBuffer.allocateDirect(
+                    DEFAULT_BUFFER_SIZE
+                )
+            )
+        }
+        delay(2000)
     }
 
     private fun setgpioBit(gpio: Int, value: Int) {
@@ -478,12 +511,12 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace) : Clo
             val msg = "Invalid sample rate: ${rate}Hz"
             throw IllegalArgumentException(msg)
         }
-        rsampRatio = ((tunableDevice!!.rtlXtal() * 2.0.pow(22) / rate).toInt())
+        rsampRatio = ((tunableDevice.rtlXtal() * 2.0.pow(22) / rate).toInt())
         rsampRatio = rsampRatio and 0x0ffffffc
         realRsampRatio = rsampRatio or ((rsampRatio and 0x08000000) shl 1)
-        realRate = (tunableDevice!!.rtlXtal() * 2.0.pow(22) / realRsampRatio)
+        realRate = (tunableDevice.rtlXtal() * 2.0.pow(22) / realRsampRatio)
         println("Exact sample rate set to ${realRate}Hz")
-        tunableDevice?.let {
+        tunableDevice.let {
             setI2cRepeater(1)
             it.setBW(if (it.bandwidth != 0L) it.bandwidth else realRate.toLong())
             setI2cRepeater(0)
@@ -492,13 +525,13 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace) : Clo
         r = (r or demodWriteReg(1, 0x9f, tmp, 2))
         tmp = rsampRatio and 0xffff
         r = (r or demodWriteReg(1, 0xa1, tmp, 2))
-        r = (r or setSampleFrequencyCorrection(tunableDevice!!.ppmCorrection))
+        r = (r or setSampleFrequencyCorrection(tunableDevice.ppmCorrection))
 
         r = (r or demodWriteReg(1, 0x01, 0x14, 1))
         r = (r or demodWriteReg(1, 0x01, 0x10, 1))
+        tunableDevice.rate = realRate.roundToInt()
 
         return r
-        //dev.rate = realRate.roundToInt()
     }
 
     fun setAGCMode(enabled: Boolean) {
