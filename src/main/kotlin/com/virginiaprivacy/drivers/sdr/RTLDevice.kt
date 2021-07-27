@@ -283,7 +283,7 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace) : Clo
     internal fun i2cReadReg(i2cAddress: Int, reg: Int): Int {
         val address = i2cAddress.toUShort()
         writeArray(Blocks.IICB, address, byteArrayOf(reg.toByte()), 1)
-        return BigInteger(readArray(Blocks.IICB, i2cAddress, 1)).intValueExact()
+        return readArray(Blocks.IICB, i2cAddress, 1)[0].toInt()
     }
 
     internal fun i2cWrite(i2cAddress: Int, buffer: ByteArray, len: Int): Int {
