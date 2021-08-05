@@ -8,6 +8,7 @@ import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.consumeAsFlow
 import java.io.Closeable
 import java.io.File
 import java.io.IOException
@@ -442,21 +443,23 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace) : Clo
                     }
                 }
                 launch {
-                    while (ioStatus() == IOStatus.ACTIVE) {
-                        if (ioStatus() == IOStatus.ACTIVE) {
-                            val i = c.receiveCatching().getOrThrow()
-                            val r = usbDevice.waitForTransferResult()
-                            val bytes = ByteArray(r.position())
-                            r.rewind()
-                            r.get(bytes)
-                            Status.bytesRead += bytes.size.toLong()
-                            c.send(i)
-                            flow.emit(bytes)
-                        } else {
-                            cancel()
+                    c
+                        .consumeAsFlow()
+                        .collect {
+                            if (ioStatus() == IOStatus.ACTIVE) {
+                                val r = usbDevice.waitForTransferResult()
+                                val bytes = ByteArray(r.position())
+                                r.rewind()
+                                r.get(bytes)
+                                Status.bytesRead += bytes.size.toLong()
+                                c.send(it)
+                                flow.emit(bytes)
+                            } else {
+                                cancel()
+                            }
                         }
-                    }
                 }
+
 //                    for (i in 0.until(buffer.size)) {
 //                        usbDevice.submitBulkTransfer(i)
 //                        if (ioStatus() == IOStatus.ACTIVE) {
