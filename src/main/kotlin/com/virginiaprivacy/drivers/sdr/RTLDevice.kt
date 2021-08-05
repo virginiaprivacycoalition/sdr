@@ -4,12 +4,13 @@ import com.virginiaprivacy.drivers.sdr.data.Status
 import com.virginiaprivacy.drivers.sdr.r2xx.R82XX
 import com.virginiaprivacy.drivers.sdr.usb.UsbIFace
 import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.collect
 import java.io.Closeable
 import java.io.File
 import java.io.IOException
-import java.math.BigInteger
 import java.nio.ByteBuffer
 import java.nio.file.Files
 import java.nio.file.StandardOpenOption
@@ -34,7 +35,7 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace) : Clo
 
     lateinit var tunableDevice: TunableDevice
 
-    val scope = CoroutineScope(
+    private val scope = CoroutineScope(
         Executors.newSingleThreadExecutor().asCoroutineDispatcher()
     )
 
@@ -428,31 +429,57 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace) : Clo
         Status.bytesRead = 0
         Status.setIOStatus(IOStatus.ACTIVE)
         scope.launch {
-            allocateBuffersAsync()
-
-            while (ioStatus() == IOStatus.ACTIVE) {
-                for (i in 0.until(buffer.size)) {
-                    usbDevice.submitBulkTransfer(i)
-                    if (ioStatus() == IOStatus.ACTIVE) {
-                        val transferResult = usbDevice.waitForTransferResult()
-                        if (transferResult == null) {
-                            // Read failed
-                            Status.setIOStatus(IOStatus.EXIT)
-                            cancel()
-                            return@launch
+            coroutineScope {
+                allocateBuffersAsync()
+                val c = Channel<Int>(buffer.size, BufferOverflow.SUSPEND) {
+                    usbDevice.submitBulkTransfer(it)
+                }
+                launch {
+                    (0..buffer.size).forEach {
+                        while (c.trySend(it).isFailure) {
+                            yield()
                         }
-                        val bytes = ByteArray(transferResult.position())
-                        transferResult.rewind()
-                        transferResult.get(bytes)
-                        Status.bytesRead += bytes.size.toLong()
-                        flow.emit(bytes)
-                    } else {
-                        cancel()
                     }
                 }
+                launch {
+                    while (ioStatus() == IOStatus.ACTIVE) {
+                        if (ioStatus() == IOStatus.ACTIVE) {
+                            val i = c.receiveCatching().getOrThrow()
+                            val r = usbDevice.waitForTransferResult()
+                            val bytes = ByteArray(r.position())
+                            r.rewind()
+                            r.get(bytes)
+                            Status.bytesRead += bytes.size.toLong()
+                            c.send(i)
+                            flow.emit(bytes)
+                        } else {
+                            cancel()
+                        }
+                    }
+                }
+//                    for (i in 0.until(buffer.size)) {
+//                        usbDevice.submitBulkTransfer(i)
+//                        if (ioStatus() == IOStatus.ACTIVE) {
+//                            val transferResult = usbDevice.waitForTransferResult()
+//                            if (transferResult == null) {
+//                                // Read failed
+//                                Status.setIOStatus(IOStatus.EXIT)
+//                                cancel()
+//                                return@coroutineScope
+//                            }
+//                            val bytes = ByteArray(transferResult.position())
+//                            transferResult.rewind()
+//                            transferResult.get(bytes)
+//                            Status.bytesRead += bytes.size.toLong()
+//                            flow.emit(bytes)
+//                        } else {
+//                            cancel()
+//                        }
+//                    }
             }
         }
     }
+
 
     private suspend fun allocateBuffersAsync() {
         for (i in 0.until(buffer.size)) {

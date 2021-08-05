@@ -16,8 +16,6 @@ interface Plugin {
     val scope: CoroutineScope
         get() = CoroutineScope(Executors.newSingleThreadExecutor().asCoroutineDispatcher())
 
-    fun getByteFlow() = device
-
     fun setup()
 
     fun run() {
