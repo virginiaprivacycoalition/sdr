@@ -6,9 +6,7 @@ import com.virginiaprivacy.drivers.sdr.usb.UsbIFace
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.consumeAsFlow
+import kotlinx.coroutines.flow.*
 import java.io.Closeable
 import java.io.File
 import java.io.IOException
@@ -430,34 +428,31 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace) : Clo
         Status.bytesRead = 0
         Status.setIOStatus(IOStatus.ACTIVE)
         scope.launch {
-            coroutineScope {
-                allocateBuffersAsync()
-                val c = Channel<Int>(buffer.size, BufferOverflow.SUSPEND) {
-                    usbDevice.submitBulkTransfer(it)
-                }
-                launch {
+            allocateBuffersAsync()
+
+            val c = flow<Int> {
+                while (ioStatus() == IOStatus.ACTIVE) {
                     (0..buffer.size).forEach {
-                        while (c.trySend(it).isFailure) {
-                            yield()
-                        }
+                        emit(it)
                     }
                 }
-                launch {
-                    c
-                        .consumeAsFlow()
-                        .collect {
-                            if (ioStatus() == IOStatus.ACTIVE) {
-                                val r = usbDevice.waitForTransferResult()
-                                val bytes = ByteArray(r.position())
-                                r.rewind()
-                                r.get(bytes)
-                                Status.bytesRead += bytes.size.toLong()
-                                c.send(it)
-                                flow.emit(bytes)
-                            } else {
-                                cancel()
-                            }
-                        }
+            }
+            c.onEach {
+                if (ioStatus() == IOStatus.ACTIVE) {
+                    usbDevice.submitBulkTransfer(it)
+                }
+            }
+                .collect {
+                    if (ioStatus() == IOStatus.ACTIVE) {
+                        val r = usbDevice.waitForTransferResult()
+                        val bytes = ByteArray(r.position())
+                        r.rewind()
+                        r.get(bytes)
+                        Status.bytesRead += bytes.size.toLong()
+                        flow.emit(bytes)
+                    } else {
+                        cancel()
+                      }
                 }
 
 //                    for (i in 0.until(buffer.size)) {
@@ -479,7 +474,7 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace) : Clo
 //                            cancel()
 //                        }
 //                    }
-            }
+
         }
     }
 
