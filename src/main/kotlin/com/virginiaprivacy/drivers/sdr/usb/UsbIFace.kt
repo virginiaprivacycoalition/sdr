@@ -40,14 +40,14 @@ interface UsbIFace {
      * supply the given [ByteBuffer] [buffer] to be read into or written from. It is important that
      * this function doesn't manipulate, copy, or store any references to the supplied [ByteBuffer]
      */
-    fun submitBulkTransfer(transferIndex: Int)
+    fun submitBulkTransfer(buffer: ByteBuffer)
 
     /**
      * This function should wait until a transfer is completed and the data has been written to the
      * [ByteBuffer]
      * @return the index as an Int of the transfer index that was submitted with [submitBulkTransfer]
      */
-    fun waitForTransferResult(): ByteBuffer
+    fun waitForTransferResult(): Int
 
     /**
      * This function should take any steps necessary to claim exclusive access to the read/write
@@ -63,5 +63,4 @@ interface UsbIFace {
 
     fun shutdown()
 
-    //fun getNativeError(): String
 }
