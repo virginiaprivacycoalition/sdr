@@ -11,6 +11,7 @@ import java.io.Closeable
 import java.io.File
 import java.io.IOException
 import java.nio.ByteBuffer
+import java.nio.channels.GatheringByteChannel
 import java.nio.file.Files
 import java.nio.file.StandardOpenOption
 import java.util.concurrent.Executors
@@ -42,9 +43,7 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace) : Clo
 
     val flow = MutableSharedFlow<ByteArray>(extraBufferCapacity = 12)
 
-    private val buffer = List(bufferSize) {
-        ByteArray(DEFAULT_BUF_LENGTH)
-    }
+    private val buffers = ArrayList<ByteBuffer>(DEFAULT_ASYNC_BUF_COUNT)
 
     fun setFrequency(freq: Int) {
         tunableDevice.setFrequency(freq)
@@ -376,52 +375,86 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace) : Clo
         runningPlugins.add(plugin)
     }
 
-    suspend fun takeSamples(secondsToSample: Int, outputFile: File) {
-        if (Status.getIOStatus().value == IOStatus.ACTIVE) {
-            throw IOException("Device is already in use")
-        }
-        val samplesToTake = secondsToSample * tunableDevice.rate
-        scope.launch { sampleAsync(samplesToTake) }
-        if (!outputFile.exists()) {
-            outputFile.createNewFile()
-        }
-        var startTime = System.currentTimeMillis()
-        val bufferedWriter = outputFile.outputStream()
-        val outputStream = Files.newOutputStream(outputFile.toPath(), StandardOpenOption.APPEND).buffered()
-        var bytesWritten = 0
-        flow.collect {
-            outputStream.write(it)
-            bytesWritten += it.size
-            if ((samplesToTake - bytesWritten) % 1000 == 0) {
-                println("${(samplesToTake - bytesWritten) / 1000 } seconds of sampling left.")
+//    suspend fun takeSamples(secondsToSample: Int, outputFile: File) {
+//        if (Status.getIOStatus().value == IOStatus.ACTIVE) {
+//            throw IOException("Device is already in use")
+//        }
+//        val samplesToTake = secondsToSample * tunableDevice.rate
+//        scope.launch { sampleAsync(samplesToTake) }
+//        if (!outputFile.exists()) {
+//            outputFile.createNewFile()
+//        }
+//        var startTime = System.currentTimeMillis()
+//        val bufferedWriter = outputFile.outputStream()
+//        val outputStream = Files.newOutputStream(outputFile.toPath(), StandardOpenOption.APPEND).buffered()
+//        var bytesWritten = 0
+//        flow.collect {
+//            outputStream.write(it)
+//            bytesWritten += it.size
+//            if ((samplesToTake - bytesWritten) % 1000 == 0) {
+//                println("${(samplesToTake - bytesWritten) / 1000 } seconds of sampling left.")
+//            }
+//        }
+//    }
+
+//    private fun sampleAsync(samples: Int) {
+//        var samplesTaken = 0
+//        var samplesRemaining = samples
+//        scope.launch {
+//            allocateBuffersAsync()
+//            while (Status.getIOStatus().value == IOStatus.ACTIVE && samplesRemaining > 0) {
+//                for (i in 0.until(buffer.size)) {
+//                    usbDevice.submitBulkTransfer(i)
+//                    val transferResult = usbDevice.waitForTransferResult()
+//                    val resultSize = transferResult.position()
+//                    val bytes = if (resultSize > samplesRemaining) {
+//                        ByteArray(samplesRemaining.toInt())
+//                    } else {
+//                        ByteArray(resultSize)
+//                    }
+//                    transferResult.rewind()
+//                    transferResult.get(bytes)
+//                    flow.emit(bytes)
+//                    samplesRemaining -= bytes.size
+//                }
+//            }
+//            cancel()
+//        }
+//    }
+
+    private fun submitBuffers() = flow {
+        var bufIndex = 0
+        while (true) {
+            if (ioStatus() == IOStatus.ACTIVE) {
+                usbDevice.submitBulkTransfer(buffers[bufIndex])
+                emit(bufIndex)
+                bufIndex++
+                if (bufIndex == DEFAULT_ASYNC_BUF_COUNT - 1) {
+                    bufIndex = 0
+                }
+            } else {
+                currentCoroutineContext().cancel(CancellationException("I/O is no longer in active state: ${ioStatus()}"))
             }
         }
     }
 
-    private fun sampleAsync(samples: Int) {
-        var samplesTaken = 0
-        var samplesRemaining = samples
-        scope.launch {
-            allocateBuffersAsync()
-            while (Status.getIOStatus().value == IOStatus.ACTIVE && samplesRemaining > 0) {
-                for (i in 0.until(buffer.size)) {
-                    usbDevice.submitBulkTransfer(i)
-                    val transferResult = usbDevice.waitForTransferResult()
-                    val resultSize = transferResult.position()
-                    val bytes = if (resultSize > samplesRemaining) {
-                        ByteArray(samplesRemaining.toInt())
-                    } else {
-                        ByteArray(resultSize)
-                    }
-                    transferResult.rewind()
-                    transferResult.get(bytes)
-                    flow.emit(bytes)
-                    samplesRemaining -= bytes.size
-                }
+    private fun bufferResult() =
+        submitBuffers()
+            .buffer()
+            .map { usbDevice.waitForTransferResult() }
+
+    private fun byteFlow() =
+        bufferResult()
+            .buffer()
+            .map {
+                val b = buffers[it]
+                val bytesRead = b.position()
+                val bytes = ByteArray(bytesRead)
+                b.rewind()
+                b.get(bytes)
+                Status.bytesRead += bytesRead
+                bytes
             }
-            cancel()
-        }
-    }
 
     private fun readAsync() {
         Status.startTime = System.currentTimeMillis()
@@ -430,30 +463,11 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace) : Clo
         scope.launch {
             allocateBuffersAsync()
 
-            val c = flow<Int> {
-                while (ioStatus() == IOStatus.ACTIVE) {
-                    (0..buffer.size).forEach {
-                        emit(it)
-                    }
-                }
+
+            byteFlow().collect {
+                flow.emit(it)
             }
-            c.onEach {
-                if (ioStatus() == IOStatus.ACTIVE) {
-                    usbDevice.submitBulkTransfer(it)
-                }
-            }
-                .collect {
-                    if (ioStatus() == IOStatus.ACTIVE) {
-                        val r = usbDevice.waitForTransferResult()
-                        val bytes = ByteArray(r.position())
-                        r.rewind()
-                        r.get(bytes)
-                        Status.bytesRead += bytes.size.toLong()
-                        flow.emit(bytes)
-                    } else {
-                        cancel()
-                      }
-                }
+
 
 //                    for (i in 0.until(buffer.size)) {
 //                        usbDevice.submitBulkTransfer(i)
@@ -480,11 +494,13 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace) : Clo
 
 
     private suspend fun allocateBuffersAsync() {
-        for (i in 0.until(buffer.size)) {
+        for (i in 0.until(DEFAULT_ASYNC_BUF_COUNT)) {
+            val buffer = ByteBuffer.allocateDirect(
+                DEFAULT_BUFFER_SIZE
+            )
+            buffers.add(buffer)
             usbDevice.prepareNewBulkTransfer(
-                i, ByteBuffer.allocateDirect(
-                    DEFAULT_BUFFER_SIZE
-                )
+                i, buffer
             )
         }
         delay(2000)
