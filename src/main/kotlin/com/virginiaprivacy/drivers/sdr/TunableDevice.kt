@@ -10,6 +10,7 @@ interface TunableDevice {
     val config: RTLConfig
     var ppmCorrection: Int
     var freq: Long
+
     var rate: Int
     var directSampling: Boolean
     var bandwidth: Long
@@ -22,7 +23,12 @@ interface TunableDevice {
 
     fun setBW(bw: Long)
 
-    fun setFrequency(freq: Int)
+    fun setFrequency(freq: Int) {
+        setFreq(freq)
+    }
+
+    fun setFreq(freq: Int)
+
 
     fun setGain(manualGain: Boolean, gain: Int? = null)
 

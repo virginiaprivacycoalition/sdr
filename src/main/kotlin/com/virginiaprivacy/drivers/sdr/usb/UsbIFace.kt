@@ -33,21 +33,21 @@ interface UsbIFace {
      * request. For example, on Android this would entail creating a new UsbRequest and keeping the
      * request to use for later during [submitBulkTransfer].
      */
-    fun prepareNewBulkTransfer(transferIndex: Int, byteBuffer: ByteBuffer)
+    suspend fun prepareNewBulkTransfer(transferIndex: Int, byteBuffer: ByteBuffer)
 
     /**
      * This function should initiate and enqueue the bulk USB transfer at index [transferIndex] and
      * supply the given [ByteBuffer] [buffer] to be read into or written from. It is important that
      * this function doesn't manipulate, copy, or store any references to the supplied [ByteBuffer]
      */
-    fun submitBulkTransfer(buffer: ByteBuffer)
+    suspend fun submitBulkTransfer(buffer: ByteBuffer)
 
     /**
      * This function should wait until a transfer is completed and the data has been written to the
      * [ByteBuffer]
      * @return the index as an Int of the transfer index that was submitted with [submitBulkTransfer]
      */
-    fun waitForTransferResult(): Int
+    suspend fun waitForTransferResult(): Int
 
     /**
      * This function should take any steps necessary to claim exclusive access to the read/write
