@@ -45,14 +45,6 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace) : Clo
 
     private val buffers = ArrayList<ByteBuffer>(DEFAULT_ASYNC_BUF_COUNT)
 
-    fun setFrequency(freq: Int) {
-        tunableDevice.setFrequency(freq)
-    }
-
-    fun setGain(manualGain: Boolean, gain: Int? = null) {
-        tunableDevice.setGain(manualGain, gain)
-    }
-
     fun writeRegMask(reg: Int, value: Int, bitMask: Int) {
         tunableDevice.writeRegMask(reg, value, bitMask)
     }
@@ -249,6 +241,20 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace) : Clo
         }
     }
 
+    /**
+     * Sets the tuners gain. Use setTunerGain() or setTunerGain(null) to set the tuner to
+     * automatic gain mode.
+     */
+    fun setTunerGain(gain: Int? = null) {
+        setI2cRepeater(1)
+        if (gain != null) {
+            tunableDevice.setGain(true, gain)
+        } else {
+            tunableDevice.setGain(false)
+        }
+        setI2cRepeater(0)
+    }
+
     private fun setFir() {
         val fir = UIntArray(20)
         for (i in 1..8) {
@@ -422,39 +428,10 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace) : Clo
 //        }
 //    }
 
-    private fun submitBuffers() = flow {
-        var bufIndex = 0
-        while (true) {
-            if (ioStatus() == IOStatus.ACTIVE) {
-                usbDevice.submitBulkTransfer(buffers[bufIndex])
-                emit(bufIndex)
-                bufIndex++
-                if (bufIndex == DEFAULT_ASYNC_BUF_COUNT - 1) {
-                    bufIndex = 0
-                }
-            } else {
-                currentCoroutineContext().cancel(CancellationException("I/O is no longer in active state: ${ioStatus()}"))
-            }
-        }
-    }
 
-    private fun bufferResult() =
-        submitBuffers()
-            .buffer()
-            .map { usbDevice.waitForTransferResult() }
 
-    private fun byteFlow() =
-        bufferResult()
-            .buffer()
-            .map {
-                val b = buffers[it]
-                val bytesRead = b.position()
-                val bytes = ByteArray(bytesRead)
-                b.rewind()
-                b.get(bytes)
-                Status.bytesRead += bytesRead
-                bytes
-            }
+
+
 
     private fun readAsync() {
         Status.startTime = System.currentTimeMillis()
@@ -463,10 +440,33 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace) : Clo
         scope.launch {
             allocateBuffersAsync()
 
+            var bufIndex = 0
+            while (ioStatus() == IOStatus.ACTIVE) {
+                if (ioStatus() == IOStatus.ACTIVE) {
+                    usbDevice.submitBulkTransfer(buffers[bufIndex])
+                    usbDevice.waitForTransferResult().let {
+                        val b = buffers[it]
+                        val bytesRead = b.position()
+                        if (bytesRead == 0) {
+                            error("Read 0 bytes on transfer $it")
+                        }
+                        val bytes = ByteArray(bytesRead)
+                        b.rewind()
+                        b.get(bytes)
+                        Status.bytesRead += (bytesRead / 16 / 2)
+                        flow.emit(bytes)
+                    }
 
-            byteFlow().collect {
-                flow.emit(it)
+                    bufIndex++
+                    if (bufIndex == DEFAULT_ASYNC_BUF_COUNT) {
+                        bufIndex = 0
+                    }
+                } else {
+                    currentCoroutineContext().cancel(CancellationException("I/O is no longer in active state: ${ioStatus()}"))
+                    error("")
+                }
             }
+
 
 
 //                    for (i in 0.until(buffer.size)) {
@@ -496,14 +496,13 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace) : Clo
     private suspend fun allocateBuffersAsync() {
         for (i in 0.until(DEFAULT_ASYNC_BUF_COUNT)) {
             val buffer = ByteBuffer.allocateDirect(
-                DEFAULT_BUFFER_SIZE
+                DEFAULT_BUF_LENGTH
             )
             buffers.add(buffer)
             usbDevice.prepareNewBulkTransfer(
                 i, buffer
             )
         }
-        delay(2000)
     }
 
     private fun setgpioBit(gpio: Int, value: Int) {
@@ -590,7 +589,13 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace) : Clo
         demodWriteReg(1, 0x1b, i, 1)
     }
 
-    fun setCenterFreq(dev: TunableDevice, freq: Int) {
+    fun setCenterFreq(freq: Int) {
+        if (tunableDevice.directSampling) {
+            setIFFreq(tunableDevice, freq)
+        }
+        setI2cRepeater(1)
+        tunableDevice.setFrequency(freq)
+        setI2cRepeater(0)
 
     }
 

@@ -388,7 +388,7 @@ private val usbIFace: UsbIFace) : TunableDevice, I2C {
     }
 
 
-    override fun setFrequency(freq: Int) {
+    override fun setFreq(freq: Int) {
         val loFreq = freq + this.freq
         setMux(loFreq)
         setPll(loFreq)
