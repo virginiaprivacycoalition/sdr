@@ -9,7 +9,7 @@ import java.util.concurrent.Executors
 @ExperimentalStdlibApi
 interface Plugin {
 
-    fun getForEachBuffer(bytes: ByteArray)
+    fun onEachIntBuffer(intBuf: Iterable<Int>)
 
     val device: RTLDevice
 
@@ -20,9 +20,8 @@ interface Plugin {
 
     fun run() {
         println("${this::class.qualifiedName} setup complete. . . Now running")
-            device.flow.onEach {
-                    getForEachBuffer(it)
-            }
+            device.unsignedIntFlow
+                .onEach { onEachIntBuffer(it) }
                 .launchIn(scope)
 
     }
