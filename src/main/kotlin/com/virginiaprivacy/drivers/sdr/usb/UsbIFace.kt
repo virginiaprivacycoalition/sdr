@@ -28,6 +28,10 @@ interface UsbIFace {
         timeout: Int
     ) : Int
 
+    suspend fun bulkTransfer(
+        bytes: ByteArray,
+        length: Int) : Int
+
     /**
      * This function should initiate instances anything needed to queue and submit a bulk transfer
      * request. For example, on Android this would entail creating a new UsbRequest and keeping the

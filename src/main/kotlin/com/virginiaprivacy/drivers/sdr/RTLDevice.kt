@@ -4,16 +4,12 @@ import com.virginiaprivacy.drivers.sdr.data.Status
 import com.virginiaprivacy.drivers.sdr.r2xx.R82XX
 import com.virginiaprivacy.drivers.sdr.usb.UsbIFace
 import kotlinx.coroutines.*
-import kotlinx.coroutines.channels.BufferOverflow
-import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
 import java.io.Closeable
-import java.io.File
 import java.io.IOException
 import java.nio.ByteBuffer
-import java.nio.channels.GatheringByteChannel
-import java.nio.file.Files
-import java.nio.file.StandardOpenOption
 import java.util.concurrent.Executors
 import kotlin.experimental.and
 import kotlin.experimental.or
@@ -41,7 +37,14 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace) : Clo
 
     private fun ioStatus() = Status.getIOStatus().value
 
-    val flow = MutableSharedFlow<ByteArray>(extraBufferCapacity = 12)
+    val rawFlow = MutableSharedFlow<ByteBuffer>(extraBufferCapacity = 12)
+
+    val unsignedIntFlow = rawFlow.map { byteBuffer ->
+        val size = byteBuffer.capacity()
+        val chars = CharArray(size)
+        byteBuffer.asCharBuffer().get(chars)
+        chars.map { it.code }
+    }
 
     private val buffers = ArrayList<ByteBuffer>(DEFAULT_ASYNC_BUF_COUNT)
 
@@ -372,7 +375,7 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace) : Clo
         close()
     }
 
-    val runningPlugins = mutableSetOf<Plugin>()
+    private val runningPlugins = mutableSetOf<Plugin>()
 
     fun runPlugin(plugin: Plugin) {
         plugin.setup()
@@ -432,6 +435,28 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace) : Clo
 
 
 
+    private fun sampleAsync(samples: Int) {
+        var samplesTaken = 0
+        var samplesRemaining = samples
+
+    }
+
+    fun readSync() = flow {
+        Status.startTime = System.currentTimeMillis()
+        Status.bytesRead = 0
+        Status.setIOStatus(IOStatus.ACTIVE)
+        while (true) {
+            val bytes = ByteArray(DEFAULT_BUF_LENGTH)
+            val result = usbDevice.bulkTransfer(bytes, DEFAULT_BUF_LENGTH)
+            if (result == 0) {
+                println("Read empty buffer from device")
+                continue
+            } else if (result < 0) {
+                throw IOException("Error reading from device: $result")
+            }
+            emit(bytes)
+        }
+    }
 
     private fun readAsync() {
         Status.startTime = System.currentTimeMillis()
@@ -453,8 +478,10 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace) : Clo
                         val bytes = ByteArray(bytesRead)
                         b.rewind()
                         b.get(bytes)
+                        val outputBuffer = ByteBuffer.wrap(bytes)
+                        b.clear()
                         Status.bytesRead += (bytesRead / 16 / 2)
-                        flow.emit(bytes)
+                        rawFlow.emit(outputBuffer.asReadOnlyBuffer())
                     }
 
                     bufIndex++
@@ -464,6 +491,8 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace) : Clo
                 } else {
                     currentCoroutineContext().cancel(CancellationException("I/O is no longer in active state: ${ioStatus()}"))
                     error("")
+
+                    }
                 }
             }
 
@@ -490,7 +519,7 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace) : Clo
 //                    }
 
         }
-    }
+
 
 
     private suspend fun allocateBuffersAsync() {
