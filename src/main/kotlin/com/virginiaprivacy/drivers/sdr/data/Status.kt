@@ -25,6 +25,8 @@ object Status {
             updateReadSpeed(field)
         }
 
+    val samplesRead = bytesRead / 2
+
     @Volatile
     var bytesProcessed: Long = 0
         set(value) {
