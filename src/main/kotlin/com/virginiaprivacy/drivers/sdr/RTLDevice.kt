@@ -19,9 +19,7 @@ import kotlin.math.roundToInt
 @ExperimentalCoroutinesApi
 @ExperimentalStdlibApi
 @ExperimentalUnsignedTypes
-open class RTLDevice internal constructor(private val usbDevice: UsbIFace) : Closeable {
-
-    private val bufferSize = 12
+open class RTLDevice internal constructor(private val usbDevice: UsbIFace, private val bufferSize: Int = DEFAULT_ASYNC_BUF_COUNT) : Closeable {
 
     var devLost: Int = 0
 
@@ -46,7 +44,7 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace) : Clo
         chars.map { it.code }
     }
 
-    private val buffers = ArrayList<ByteBuffer>(DEFAULT_ASYNC_BUF_COUNT)
+    private val buffers = ArrayList<ByteBuffer>(bufferSize)
 
     fun writeRegMask(reg: Int, value: Int, bitMask: Int) {
         tunableDevice.writeRegMask(reg, value, bitMask)
@@ -372,6 +370,8 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace) : Clo
         runningPlugins.forEach {
             it.scope.cancel("Shutting down")
         }
+        resetBuffer()
+        scope.cancel()
         close()
     }
 
@@ -431,10 +431,6 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace) : Clo
 //        }
 //    }
 
-
-
-
-
     private fun sampleAsync(samples: Int) {
         var samplesTaken = 0
         var samplesRemaining = samples
@@ -466,7 +462,7 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace) : Clo
             allocateBuffersAsync()
 
             var bufIndex = 0
-            while (ioStatus() == IOStatus.ACTIVE) {
+            while (this.isActive) {
                 if (ioStatus() == IOStatus.ACTIVE) {
                     usbDevice.submitBulkTransfer(buffers[bufIndex])
                     usbDevice.waitForTransferResult().let {
@@ -480,7 +476,7 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace) : Clo
                         b.get(bytes)
                         val outputBuffer = ByteBuffer.wrap(bytes)
                         b.clear()
-                        Status.bytesRead += (bytesRead / 16 / 2)
+                        Status.bytesRead += (bytesRead)
                         rawFlow.emit(outputBuffer.asReadOnlyBuffer())
                     }
 
@@ -523,7 +519,7 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace) : Clo
 
 
     private suspend fun allocateBuffersAsync() {
-        for (i in 0.until(DEFAULT_ASYNC_BUF_COUNT)) {
+        for (i in 0.until(bufferSize)) {
             val buffer = ByteBuffer.allocateDirect(
                 DEFAULT_BUF_LENGTH
             )
