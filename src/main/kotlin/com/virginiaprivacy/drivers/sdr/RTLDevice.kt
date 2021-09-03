@@ -35,14 +35,7 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace, priva
 
     private fun ioStatus() = Status.getIOStatus().value
 
-    val rawFlow = MutableSharedFlow<ByteBuffer>(extraBufferCapacity = 12)
-
-    val unsignedIntFlow = rawFlow.map { byteBuffer ->
-        val size = byteBuffer.capacity()
-        val chars = CharArray(size)
-        byteBuffer.asCharBuffer().get(chars)
-        chars.map { it.code }
-    }
+    val rawFlow = MutableSharedFlow<ByteArray>(extraBufferCapacity = 12)
 
     private val buffers = ArrayList<ByteBuffer>(bufferSize)
 
@@ -146,69 +139,6 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace, priva
         )
         checkError(result)
         return (data[1].toInt() shl 8) or data[0].toInt()
-    }
-
-    fun demodWriteReg(page: Int, address: Int, value: Short, length: Int): Int {
-        val data = UByteArray(2)
-
-        val index = 16 or page
-
-        val realAddress = (address shl 8) or 32
-
-
-        if (length == 1) {
-            data[0] = (value and 0xff).toUByte()
-        } else {
-            data[0] = (value shr 8).toUByte()
-        }
-        data[1] = (value and 0xff).toUByte()
-        val result = usbDevice.controlTransfer(
-            CTRL_OUT,
-            0,
-            realAddress,
-            index,
-            data.toByteArray(),
-            length,
-            CTRL_TIMEOUT
-        )
-        checkError(result)
-        demodReadReg(0x0a, 0x01, 1)
-        return if (result == length) {
-            0
-        } else {
-            -1
-        }
-    }
-
-    fun demodWriteReg(page: Int, address: Int, value: UInt, length: Int): Int {
-        val data = UByteArray(2)
-
-        val index = 16 or page
-
-        val realAddress = (address shl 8) or 32
-
-        if (length == 1) {
-            data[0] = (value and 255u).toUByte()
-        } else {
-            data[0] = (value shr 8).toUByte()
-        }
-        data[1] = (value and 255u).toUByte()
-        val result = usbDevice.controlTransfer(
-            CTRL_OUT,
-            0,
-            realAddress,
-            index,
-            data.toByteArray(),
-            length,
-            CTRL_TIMEOUT
-        )
-        checkError(result)
-        demodReadReg(0x0a, 0x01, 1)
-        return if (result == length) {
-            0
-        } else {
-            -1
-        }
     }
 
     fun demodWriteReg(page: Int, address: Int, value: Int, length: Int): Int {
@@ -474,10 +404,9 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace, priva
                         val bytes = ByteArray(bytesRead)
                         b.rewind()
                         b.get(bytes)
-                        val outputBuffer = ByteBuffer.wrap(bytes)
+                        rawFlow.emit(bytes)
                         b.clear()
                         Status.bytesRead += (bytesRead)
-                        rawFlow.emit(outputBuffer.asReadOnlyBuffer())
                     }
 
                     bufIndex++
@@ -485,37 +414,11 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace, priva
                         bufIndex = 0
                     }
                 } else {
-                    currentCoroutineContext().cancel(CancellationException("I/O is no longer in active state: ${ioStatus()}"))
-                    error("")
-
-                    }
+                    cancel()
                 }
             }
-
-
-
-//                    for (i in 0.until(buffer.size)) {
-//                        usbDevice.submitBulkTransfer(i)
-//                        if (ioStatus() == IOStatus.ACTIVE) {
-//                            val transferResult = usbDevice.waitForTransferResult()
-//                            if (transferResult == null) {
-//                                // Read failed
-//                                Status.setIOStatus(IOStatus.EXIT)
-//                                cancel()
-//                                return@coroutineScope
-//                            }
-//                            val bytes = ByteArray(transferResult.position())
-//                            transferResult.rewind()
-//                            transferResult.get(bytes)
-//                            Status.bytesRead += bytes.size.toLong()
-//                            flow.emit(bytes)
-//                        } else {
-//                            cancel()
-//                        }
-//                    }
-
         }
-
+    }
 
 
     private suspend fun allocateBuffersAsync() {
@@ -576,7 +479,7 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace, priva
             val msg = "Invalid sample rate: ${rate}Hz"
             throw IllegalArgumentException(msg)
         }
-        rsampRatio = ((tunableDevice.rtlXtal() * 2.0.pow(22) / rate).toInt())
+        rsampRatio = (tunableDevice.rtlXtal() * 2.0.pow(22) / rate).roundToInt()
         rsampRatio = rsampRatio and 0x0ffffffc
         realRsampRatio = rsampRatio or ((rsampRatio and 0x08000000) shl 1)
         realRate = (tunableDevice.rtlXtal() * 2.0.pow(22) / realRsampRatio)

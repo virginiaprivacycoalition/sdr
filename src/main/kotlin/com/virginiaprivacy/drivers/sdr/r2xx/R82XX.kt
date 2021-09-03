@@ -388,7 +388,7 @@ private val usbIFace: UsbIFace) : TunableDevice, I2C {
     }
 
 
-    override fun setFreq(freq: Int) {
+    override fun setFrequency(freq: Int) {
         val loFreq = freq + this.freq
         setMux(loFreq)
         setPll(loFreq)
@@ -488,53 +488,6 @@ private val usbIFace: UsbIFace) : TunableDevice, I2C {
         this.bandwidth = mutableBW
         println("Set bandwidth to $realBw")
     }
-
-
-//        debug("Byte length: ${buf.size} estimated: $len ${buf}")
-//        airplaneData.incrementMessages()
-//        var i = 0
-//        while (i < len) {
-//
-//            val bufferInt = buf[i].toInt()
-//            if (bufferInt > 1) {
-//                i++
-//                continue
-//            }
-//            var frameLen = 112
-//            var data_i = 0
-//            for (index in 0 until 14) {
-//                adsbFrame[index] = 0
-//            }
-//            while (i <= len && bufferInt <= 1 && data_i <= frameLen) {
-//                if (bufferInt == 1) {
-//                    var index = data_i / 8
-//                    val shift = 7 - (data_i % 8)
-//                    adsbFrame[index] = adsbFrame[index] or (1 shl shift)
-//                }
-//                if (data_i == 7) {
-//                    if (adsbFrame[0] == 0) {
-//                        i++
-//                        data_i++
-//                        break
-//                    }
-//                    frameLen = if ((adsbFrame[0] and 0x80) == 1) {
-//                        112
-//                    } else {
-//                        56
-//                    }
-//                }
-//                i++
-//                data_i++
-//            }
-//            i++
-//            if (data_i < (frameLen - 1)) {
-//                continue
-//            }
-//
-//            displayMessage(adsbFrame, frameLen)
-//            // Display
-//        }
-
 
     private fun error(text: String) {
         println("ERROR: $text")
