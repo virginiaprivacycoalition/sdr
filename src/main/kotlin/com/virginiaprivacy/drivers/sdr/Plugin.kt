@@ -18,10 +18,12 @@ interface Plugin {
 
     fun setup()
 
+    fun processBuffer(buf: ByteArray)
+
     fun run() {
         println("${this::class.qualifiedName} setup complete. . . Now running")
-            device.unsignedIntFlow
-                .onEach { onEachIntBuffer(it) }
+            device.rawFlow
+                .onEach { processBuffer(it) }
                 .launchIn(scope)
 
     }

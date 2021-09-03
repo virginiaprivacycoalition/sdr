@@ -23,12 +23,7 @@ interface TunableDevice {
 
     fun setBW(bw: Long)
 
-    fun setFrequency(freq: Int) {
-        setFreq(freq)
-    }
-
-    fun setFreq(freq: Int)
-
+    fun setFrequency(freq: Int)
 
     fun setGain(manualGain: Boolean, gain: Int? = null)
 
