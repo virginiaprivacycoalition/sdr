@@ -1,6 +1,7 @@
 package com.virginiaprivacy.drivers.sdr.r2xx
 
 import com.virginiaprivacy.drivers.sdr.*
+import com.virginiaprivacy.drivers.sdr.RTLDevice.Companion.DEFAULT_RTL_XTAL_FREQ
 import com.virginiaprivacy.drivers.sdr.RTLDevice.Companion.R828D_XTAL_FREQ
 import com.virginiaprivacy.drivers.sdr.RTLDevice.Companion.R82XX_IF_FREQ
 import com.virginiaprivacy.drivers.sdr.r2xx.R82xxChip.*
@@ -35,8 +36,6 @@ private val usbIFace: UsbIFace) : TunableDevice, I2C {
 
     private var delsys: R82xxDeliverySystem? = null
 
-    //override var enableShortOutput: Boolean = true
-
     private fun shadowStore(reg: Int, value: ByteArray, len: Int) {
         var r = reg - REG_SHADOW_START
         var len2 = len
@@ -52,7 +51,7 @@ private val usbIFace: UsbIFace) : TunableDevice, I2C {
         }
     }
 
-    private fun r28xxWrite(reg: Int, value: ByteArray, len: Int) {
+    private fun r82xxWrite(reg: Int, value: ByteArray, len: Int) {
         shadowStore(reg, value, len)
         var len2 = len
         var pos = 0
@@ -63,13 +62,20 @@ private val usbIFace: UsbIFace) : TunableDevice, I2C {
             } else {
                 len
             }
+            val buffer = ByteArray(size)
             buf[0] = reg2.toUByte().toByte()
+            buffer[0] = buf[0]
             for ((index, i) in (1 until size).withIndex()) {
-                buf[i] = value[index].toUByte().toByte()
+                buffer[i] = value[index].toUByte().toByte()
             }
 
-            when (val r = i2cWriteFun(config.i2cAddr, buf, size + 1)) {
-                (size + 1) -> {
+            if (buffer.size >= config.maxI2cMsgLen) {
+                throw IOException("Buffer of size ${buffer.size} is bigger than max i2c message length of ${config.maxI2cMsgLen}")
+            }
+
+            when (val r = i2cWriteFun(config.i2cAddr, buffer, buffer.size)) {
+                (size) -> {
+
                 }
                 else -> {
                     error("result: $r | size: $size")
@@ -83,13 +89,13 @@ private val usbIFace: UsbIFace) : TunableDevice, I2C {
     }
 
     override fun writeReg(reg: Int, value: Int) {
-        r28xxWrite(reg, byteArrayOf(value.toByte()), 1)
+        r82xxWrite(reg, byteArrayOf(value.toByte()), 1)
     }
 
     private fun r82xxReadCacheReg(reg: Int): Int {
-        var reg2 = reg - REG_SHADOW_START
-        if (reg in 0 until NUM_REGS) {
-            return regs[reg]
+        val reg2 = reg - REG_SHADOW_START
+        if (reg2 in 0 until NUM_REGS) {
+            return regs[reg2]
         }
         return -1
     }
@@ -98,7 +104,7 @@ private val usbIFace: UsbIFace) : TunableDevice, I2C {
         val rc = r82xxReadCacheReg(reg)
         if (rc < 0) return
         val value2 = (rc and bitMask.inv()) or (value and bitMask)
-        return r28xxWrite(reg, byteArrayOf(value2.toUByte().toByte()), 1)
+        return r82xxWrite(reg, byteArrayOf(value2.toUByte().toByte()), 1)
     }
 
     private fun bitRev(byte: UByte): Int {
@@ -107,11 +113,13 @@ private val usbIFace: UsbIFace) : TunableDevice, I2C {
     }
 
     override fun read(reg: Int, len: Int): ByteArray {
-        val i = buf[1]
         buf[0] = reg.toByte()
-        val rc = i2cWriteFun(config.i2cAddr, buf, 1)
+        val buffer = ByteArray(1) {
+            buf[0]
+        }
+        val rc = i2cWriteFun(config.i2cAddr, buffer, 1)
         if (rc != 1) {
-            TODO("Throw error")
+            throw IOException("result: $rc")
         }
         val result = i2cReadFun(config.i2cAddr, len)
         return result.asUByteArray().map { bitRev(it).toUByte() }.toUByteArray().toByteArray()
@@ -159,16 +167,15 @@ private val usbIFace: UsbIFace) : TunableDevice, I2C {
     }
 
     private fun setPll(freq: Long) {
-        val sleepTime = 10000
         val vcoMin = 1770000
         val vcoMax = vcoMin * 2
         var nSdm = 2
         var sdm = 0
         var mixDiv = 2
-        var divBuf = 0
+        var divBuf: Int
         var divNum = 0
         var vcoPowerRef = 2
-        var refDiv2 = 0
+        val refDiv2 = 0
 
         val freqKhz = (freq + 500) / 1000
         val pllRef = config.xtal
@@ -263,7 +270,6 @@ private val usbIFace: UsbIFace) : TunableDevice, I2C {
         val ltAtt = 0x00
         val fltExtWidest = 0x00
         val polyfilCur = 0x60
-        val length = initArray.size
         initArray.forEachIndexed { index, i ->
             regs[index] = i
         }
@@ -360,7 +366,6 @@ private val usbIFace: UsbIFace) : TunableDevice, I2C {
                 1
             ) < 0
         ) {
-            TODO("reset device")
             kotlin.error("Reset device")
         }
         dev.initBaseband()
@@ -368,17 +373,18 @@ private val usbIFace: UsbIFace) : TunableDevice, I2C {
         dev.setI2cRepeater(1)
         var tunerFreq = 0
         //TODO("Check for other types of devices once support for them is added")
-        when (dev.tunerChip) {
+        tunerFreq = when (dev.tunerChip) {
             Tuner.RTLSDR_TUNER_R828D -> {
-                tunerFreq = R828D_XTAL_FREQ
+                R828D_XTAL_FREQ
             }
+            else -> DEFAULT_RTL_XTAL_FREQ
         }
         dev.demodWriteReg(1, 0x0b, 0x1a, 1)
         dev.demodWriteReg(0, 0x08, 0x4d, 1)
         dev.setIFFreq(this, R82XX_IF_FREQ)
         dev.demodWriteReg(1, 0x15, 0x01, 1)
         xtalCapSel = R82xxXtalCapValue.XTAL_HIGH_CAP_0P
-        r28xxWrite(0x05, initArray.map { it.toByte() }.toByteArray(), initArray.size)
+        r82xxWrite(0x05, initArray.map { it.toByte() }.toByteArray(), initArray.size)
         setTVStandard(3, R82xxTunerType.TUNER_DIGITAL_TV, 0)
         sysFreqSelect(0)
         this.initDone = true
@@ -386,7 +392,6 @@ private val usbIFace: UsbIFace) : TunableDevice, I2C {
         println("Device configured: " +
                 "${this.usbIFace.productName} by ${this.usbIFace.manufacturerName}")
     }
-
 
     override fun setFrequency(freq: Int) {
         val loFreq = freq + this.freq
@@ -438,7 +443,7 @@ private val usbIFace: UsbIFace) : TunableDevice, I2C {
         var realBw = 0
         var i = 0
         var mutableBW = bw
-        var reg0a = 0
+        val reg0a: Int
         var reg0b = 0
         if (mutableBW > 7000000) {
             reg0a = 0x10

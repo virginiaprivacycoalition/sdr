@@ -9,8 +9,6 @@ import java.util.concurrent.Executors
 @ExperimentalStdlibApi
 interface Plugin {
 
-    fun onEachIntBuffer(intBuf: Iterable<Int>)
-
     val device: RTLDevice
 
     val scope: CoroutineScope
@@ -22,10 +20,12 @@ interface Plugin {
 
     fun run() {
         println("${this::class.qualifiedName} setup complete. . . Now running")
+        scope.launch {
             device.rawFlow
-                .onEach { processBuffer(it) }
-                .launchIn(scope)
-
+                .collect {
+                    processBuffer(buf = it)
+                }
+        }
     }
 
 

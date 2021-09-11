@@ -70,6 +70,14 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace, priva
         return bytes
     }
 
+    /**
+     * Writes an array to the device using a control transfer.
+     * @param block - the page/block of the register that is being written to.
+     * @param address - the address to write directly to.
+     * @param array - the array of bytes to be written.
+     * @param length - the amount of bytes to be written.
+     * @return Int - The number of bytes that was written.
+     */
     private fun writeArray(block: Int, address: UShort, array: ByteArray, length: Int): Int {
         val index = (block shl 8) or 0x10
         return usbDevice.controlTransfer(
@@ -84,7 +92,7 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace, priva
     }
 
     private fun readReg(block: Int, address: Int, length: Int): Int {
-        val data = UByteArray(2).toByteArray()
+        val data = UByteArray(length).toByteArray()
         val index = block shl 8
         val result =
             usbDevice.controlTransfer(
@@ -97,19 +105,23 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace, priva
                 CTRL_TIMEOUT
             )
         checkError(result)
-        return (data[1].toInt() shl 8) or data[0].toInt()
+        return when (length) {
+            0 -> 0
+            1 -> data[0].toInt()
+            else -> (data[1].toInt() shl 8 or data[0].toInt())
+        }
     }
 
     fun writeReg(block: Int, address: Int, value: Int, length: Int): Int {
-        val data = UByteArray(2)
+        val data = UByteArray(length)
 
         val index = (block shl 8) or 0x10
         if (length == 1) {
             data[0] = (value and 0xff).toUByte()
         } else {
             data[0] = ((value.toUInt() shr 8).toUByte())
+            data[1] = (value.toUInt() and 255u).toUByte()
         }
-        data[1] = (value.toUInt() and 255u).toUByte()
 
         val result = usbDevice.controlTransfer(
             CTRL_OUT,
@@ -125,7 +137,7 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace, priva
     }
 
     private fun demodReadReg(page: Int, address: Int, length: Int): Int {
-        val data = UByteArray(2)
+        val data = UByteArray(length)
         val realAddress = (address shl 8) or 32
 
         val result = usbDevice.controlTransfer(
@@ -138,11 +150,18 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace, priva
             CTRL_TIMEOUT
         )
         checkError(result)
-        return (data[1].toInt() shl 8) or data[0].toInt()
+        return when (length) {
+            0 -> 0
+            1 -> data[0].toInt()
+            else -> (data[1].toInt() shl 8 or data[0].toInt())
+        }
     }
 
+    /**
+     *
+     */
     fun demodWriteReg(page: Int, address: Int, value: Int, length: Int): Int {
-        val data = UByteArray(2)
+        val data = UByteArray(length)
 
         val index = 16 or page
 
@@ -152,8 +171,8 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace, priva
             data[0] = (value and 0xff).toUByte()
         } else {
             data[0] = (value shr 8).toUByte()
+            data[1] = (value and 0xff).toUByte()
         }
-        data[1] = (value and 0xff).toUByte()
         val result = usbDevice.controlTransfer(
             CTRL_OUT,
             0,
@@ -165,11 +184,7 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace, priva
         )
         checkError(result)
         demodReadReg(0x0a, 0x01, 1)
-        return if (result == length) {
-            0
-        } else {
-            -1
-        }
+        return result
     }
 
     /**
@@ -208,7 +223,7 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace, priva
         }
 
         fir.forEachIndexed { index, uInt ->
-            if (demodWriteReg(1, 0x1c + index, uInt.toInt(), 1) != 0) {
+            if (demodWriteReg(1, 0x1c + index, uInt.toInt(), 1) != 1) {
                 val msg = "FIR[$index]: $uInt did not return 0."
                 throw IllegalArgumentException(msg)
             }
@@ -222,6 +237,13 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace, priva
         return readArray(Blocks.IICB, i2cAddress, 1)[0].toInt()
     }
 
+    /**
+     * Writes data to the I2C address.
+     * @param i2cAddress - the starting i2c address.
+     * @param buffer - the bytes to write.
+     * @param len - the length of the bytes to be written.
+     * @returns the number of bytes written to the i2c register.
+     */
     internal fun i2cWrite(i2cAddress: Int, buffer: ByteArray, len: Int): Int {
         val address = i2cAddress.toUShort()
         return writeArray(Blocks.IICB, address, buffer, len)
