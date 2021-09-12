@@ -6,12 +6,10 @@ import com.virginiaprivacy.drivers.sdr.usb.UsbIFace
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.map
 import java.io.Closeable
 import java.io.IOException
 import java.nio.ByteBuffer
 import java.util.concurrent.Executors
-import kotlin.experimental.and
 import kotlin.experimental.or
 import kotlin.math.pow
 import kotlin.math.roundToInt
@@ -506,11 +504,6 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace, priva
         realRsampRatio = rsampRatio or ((rsampRatio and 0x08000000) shl 1)
         realRate = (tunableDevice.rtlXtal() * 2.0.pow(22) / realRsampRatio)
         println("Exact sample rate set to ${realRate}Hz")
-        tunableDevice.let {
-            setI2cRepeater(1)
-            it.setBW(if (it.bandwidth != 0L) it.bandwidth else realRate.toLong())
-            setI2cRepeater(0)
-        }
         var tmp = rsampRatio shr 16
         r = (r or demodWriteReg(1, 0x9f, tmp, 2))
         tmp = rsampRatio and 0xffff
@@ -529,7 +522,7 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace, priva
         demodWriteReg(0, 0x19, i, 1)
     }
 
-    fun setIFFreq(dev: TunableDevice, freq: Int) {
+    fun setIFFreq(dev: TunableDevice, freq: Long) {
         val ifFreq = ((freq * 2.0.pow(22)) / dev.getXtalFreq() * (-1)).toInt()
         var i = (ifFreq shr 16) and 0x3f
         demodWriteReg(1, 0x19, i, 1)
@@ -539,7 +532,7 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace, priva
         demodWriteReg(1, 0x1b, i, 1)
     }
 
-    fun setCenterFreq(freq: Int) {
+    fun setCenterFreq(freq: Long) {
         if (tunableDevice.directSampling) {
             setIFFreq(tunableDevice, freq)
         }
@@ -575,7 +568,7 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace, priva
         private const val ENDPOINT_OUT: Byte = 0x00.toByte()
         const val EEPROM_ADDR = 0xa0
         const val FIR_LEN = 16
-        const val R82XX_IF_FREQ = 3570000
+        const val R82XX_IF_FREQ: Long = 3570000
         const val R828D_XTAL_FREQ = 16000000
 
         val CTRL_IN = (REQUEST_TYPE_VENDOR or ENDPOINT_IN).toInt()

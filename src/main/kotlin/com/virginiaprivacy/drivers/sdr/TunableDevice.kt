@@ -9,7 +9,7 @@ interface TunableDevice {
 
     val config: RTLConfig
     var ppmCorrection: Int
-    var freq: Long
+    val ifFrequency: Long
 
     var rate: Int
     var directSampling: Boolean
@@ -17,13 +17,11 @@ interface TunableDevice {
 
     fun rtlXtal(): Int = config.xtal
 
-    fun getTunerFreq() = (((this.freq) * (1.0 + this.ppmCorrection / 1e6)))
+    fun getTunerFreq() = (((this.ifFrequency) * (1.0 + this.ppmCorrection / 1e6)))
 
     fun getXtalFreq() = (((this.rtlXtal()) * (1.0 + this.ppmCorrection / 1e6)))
 
-    fun setBW(bw: Long)
-
-    fun setFrequency(freq: Int)
+    fun setFrequency(freq: Long)
 
     fun setGain(manualGain: Boolean, gain: Int? = null)
 
