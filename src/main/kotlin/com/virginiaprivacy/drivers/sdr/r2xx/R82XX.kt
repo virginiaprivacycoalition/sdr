@@ -4,6 +4,7 @@ import com.virginiaprivacy.drivers.sdr.*
 import com.virginiaprivacy.drivers.sdr.RTLDevice.Companion.DEFAULT_RTL_XTAL_FREQ
 import com.virginiaprivacy.drivers.sdr.RTLDevice.Companion.R828D_XTAL_FREQ
 import com.virginiaprivacy.drivers.sdr.RTLDevice.Companion.R82XX_IF_FREQ
+import com.virginiaprivacy.drivers.sdr.r2xx.R82XX.Reg.*
 import com.virginiaprivacy.drivers.sdr.r2xx.R82xxChip.*
 import com.virginiaprivacy.drivers.sdr.usb.UsbIFace
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -28,7 +29,7 @@ private val usbIFace: UsbIFace) : TunableDevice, I2C {
     var r82xxTunerType: R82xxTunerType? = null
 
     override var ppmCorrection: Int = 0
-    override var freq: Long = 0
+    override val ifFrequency = R82XX_IF_FREQ
     override var rate: Int = 0
     override var directSampling: Boolean = false
     override var bandwidth: Long = 0
@@ -129,26 +130,12 @@ private val usbIFace: UsbIFace) : TunableDevice, I2C {
         frequencyRanges.firstOrNull { (freq / 1000000) < it.freq }
         val range =
             frequencyRanges.firstOrNull { (freq / 1000000) < it.freq } ?: frequencyRanges.last()
-        writeRegMask(0x17, range.openD, 0x08)
-        writeRegMask(0x1a, range.rfMuxPloy, 0xc3)
+        OPEN_D.write(range.openD)
+        RFMUX.write(range.rfMuxPloy)
         writeReg(0x1b, range.tfC)
-        val cap = when (xtalCapSel) {
-            R82xxXtalCapValue.XTAL_LOW_CAP_30P, R82xxXtalCapValue.XTAL_LOW_CAP_20P -> {
-                range.xtalCap20p or 0x80
-            }
-            R82xxXtalCapValue.XTAL_LOW_CAP_10P -> {
-                range.xtalCap10p or 0x08
-            }
-            R82xxXtalCapValue.XTAL_HIGH_CAP_0P -> {
-                range.xtalCap0p or 0x00
-            }
-            R82xxXtalCapValue.XTAL_LOW_CAP_0P -> {
-                range.xtalCap0p or 0x08
-            }
-        }
-        writeRegMask(0x10, cap, 0x0b)
-        writeRegMask(0x08, 0x00, 0x3f)
-        writeRegMask(0x09, 0x00, 0x3f)
+        XTAL_CAP.write(range.xtalCap0p or 0x00)
+        MIXER_BUFFER_POWER.write(0x00)
+        IF_FILTER_POWER.write(0x00)
     }
 
     fun standBy() {
@@ -181,9 +168,9 @@ private val usbIFace: UsbIFace) : TunableDevice, I2C {
         val pllRef = config.xtal
         val refKhz = (config.xtal + 500) / 1000
 
-        writeRegMask(0x10, refDiv2, 0x10)
-        writeRegMask(0x1a, 0x00, 0x0c)
-        writeRegMask(0x12, 0x80, 0xe0)
+        PLL_REFDIV.write(0x00)
+        PLL_AUTOTUNE_CLOCKRATE.write(0x00)
+        VCO_CURRENT.write(0x80)
         while (mixDiv <= 64) {
             if ((freqKhz * mixDiv >= vcoMin) && (freqKhz * mixDiv < vcoMax)) {
                 divBuf = mixDiv
@@ -276,11 +263,9 @@ private val usbIFace: UsbIFace) : TunableDevice, I2C {
 
         writeRegMask(0x0c, 0x00, 0x0f)
         writeRegMask(0x13, VER_NUM, 0x3f)
-        if (r82xxTunerType != R82xxTunerType.TUNER_ANALOG_TV) {
-            writeRegMask(0x1d, 0x00, 0x38)
-        }
+        writeRegMask(0x1d, 0x00, 0x38)
 
-        this.freq = ifKhz * 1000L
+
 
         var needCalibration = true
 
@@ -289,7 +274,7 @@ private val usbIFace: UsbIFace) : TunableDevice, I2C {
                 writeRegMask(11, hpCor, 0x60)
                 writeRegMask(15, 4, 0x04)
                 writeRegMask(16, 0, 0x03)
-                setPll((filtCalLo * 1000).toLong())
+                setPll((56000 * 1000).toLong())
                 if (!hasLock) {
                 }
 
@@ -336,7 +321,6 @@ private val usbIFace: UsbIFace) : TunableDevice, I2C {
             writeRegMask(0x0a, filter_cur, 0x60)
         }
 
-        if (r82xxTunerType != R82xxTunerType.TUNER_ANALOG_TV) {
             writeRegMask(0x1d, 0, 0x38)
             writeRegMask(0x1c, 0, 0x04)
             writeRegMask(0x06, 0, 0x40)
@@ -345,17 +329,11 @@ private val usbIFace: UsbIFace) : TunableDevice, I2C {
             writeRegMask(0x1c, flags.mixer_top, 0x04)
             writeRegMask(0x1e, flags.lna_discharge, 0x1f)
             writeRegMask(0x1a, 0x20, 0x30)
-        } else {
-            flags.run {
-                writeRegMask(0x06, 0, 0x40)
-                writeRegMask(0x1d, lna_top, 0x38)
-                writeRegMask(0x1c, mixer_top, 0x04)
-                writeRegMask(0x1e, lna_discharge, 0x1f)
-                writeRegMask(0x1a, 0x00, 0x30)
-                writeRegMask(0x10, 0x00, 0x04)
-            }
-        }
     }
+
+//    fun pllLocked(): Boolean {
+//        read(2, 1)
+//    }
 
 
     fun setup() {
@@ -393,8 +371,8 @@ private val usbIFace: UsbIFace) : TunableDevice, I2C {
                 "${this.usbIFace.productName} by ${this.usbIFace.manufacturerName}")
     }
 
-    override fun setFrequency(freq: Int) {
-        val loFreq = freq + this.freq
+    override fun setFrequency(freq: Long) {
+        val loFreq = freq + this.ifFrequency
         setMux(loFreq)
         setPll(loFreq)
         val airCable1In = if (freq > 345.mhz()) 0x00 else 0x60
@@ -439,63 +417,76 @@ private val usbIFace: UsbIFace) : TunableDevice, I2C {
         }
     }
 
-    override fun setBW(bw: Long) {
-        var realBw = 0
-        var i = 0
-        var mutableBW = bw
-        val reg0a: Int
-        var reg0b = 0
-        if (mutableBW > 7000000) {
-            reg0a = 0x10
-            reg0b = 0x0b
-            this.freq = 4570000
-        } else if (mutableBW > 6000000) {
-            reg0a = 0x10
-            reg0b - 0x2a
-            this.freq = 4570000
-        } else if (mutableBW > IF_LOWPASS_BANDWIDTH_TABLE[0] + FILT_HP_BW1 + FILT_HP_BW2) {
-            reg0a = 0x10
-            reg0b = 0x6b
-            this.freq = 3570000
-        } else {
-            reg0a = 0x00
-            reg0b = 0x80
-            this.freq = 2300000
-
-            if (mutableBW > IF_LOWPASS_BANDWIDTH_TABLE[0] + FILT_HP_BW1) {
-                mutableBW -= FILT_HP_BW2
-                this.freq += FILT_HP_BW2
-                realBw += FILT_HP_BW2
-            } else {
-                reg0b = reg0b or 0x20
-            }
-
-            if (mutableBW > IF_LOWPASS_BANDWIDTH_TABLE[0]) {
-                mutableBW -= FILT_HP_BW1
-                this.freq += FILT_HP_BW1
-                realBw += FILT_HP_BW1
-            } else {
-                reg0b = reg0b or 0x40
-            }
-
-            for (it in IF_LOWPASS_BANDWIDTH_TABLE) {
-                i++
-                if (bw > it)
-                    break
-            }
-            --i
-            reg0b = reg0b or (15 - i)
-            realBw += IF_LOWPASS_BANDWIDTH_TABLE[i]
-            this.freq -= realBw / 2
-        }
-        writeRegMask(10, reg0a, 16)
-        writeRegMask(11, reg0b, 239)
-        this.bandwidth = mutableBW
-        println("Set bandwidth to $realBw")
-    }
-
     private fun error(text: String) {
         println("ERROR: $text")
+    }
+
+    enum class Reg(val address: Int, val mask: Int) {
+
+        /**
+         * LNA gain mode switch
+         * 0: auto 1: manual
+         */
+        LNA_GAIN(0x05, 0X1F),
+
+        /**
+         * Open drain
+         * 0: High-Z 1: Low-Z
+         */
+        OPEN_D(0x17, 0x08),
+
+        /**
+         * Tracking filter switch
+         * 00: Tracking filter on
+         * 01: Bypass tracking filter
+         */
+        RFMUX(0x1A, 0xC3),
+
+        /**
+         * Internal xtal cap settings
+         * 00: no cap, 01: 10pF
+         * 10: 20pF, 11: 30pF
+         */
+        XTAL_CAP(0x10, 0x0B),
+
+        /**
+         * Mixer buffer power
+         * 0: off 1: on
+         */
+        MIXER_BUFFER_POWER(0x08, 0x3F),
+
+        /**
+         * IF filter power
+         * 0: filter on
+         * 1: off
+         */
+        IF_FILTER_POWER(0x09, 0x3F),
+
+        /**
+         * PLL reference frequency divider
+         * 0: fref=xtal_freq
+         * 1: fref=xtal_freq / 2
+         */
+        PLL_REFDIV(0x10, 0x10),
+
+        /**
+         * PLL autotune clockrate
+         * 00: 128 khz
+         * 01: 32 khz
+         * 10: 8khz
+         */
+        PLL_AUTOTUNE_CLOCKRATE(0x1A, 0x0C),
+
+        /**
+         * ?
+         */
+        VCO_CURRENT(0x12, 0xE0),
+
+
+    }
+
+    fun Reg.write(value: Int) {
+        this@R82XX.writeRegMask(this.address, value, mask)
     }
 
 
@@ -510,6 +501,8 @@ private val usbIFace: UsbIFace) : TunableDevice, I2C {
         const val VER_NUM = 49
         const val FILT_HP_BW1 = 350000
         const val FILT_HP_BW2 = 380000
+
+//        private const val DIVIDER_0 =
 
         val initArray = intArrayOf(
             0x83, 0x32, 0x75,            /* 05 to 07 */
