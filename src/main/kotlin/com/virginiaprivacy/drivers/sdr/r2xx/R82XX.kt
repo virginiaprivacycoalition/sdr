@@ -26,6 +26,7 @@ private val usbIFace: UsbIFace) : TunableDevice, I2C {
     private var input = 0
     private var hasLock: Boolean = false
     private var initDone: Boolean = false
+    private var tunedFrequency: Long = 0
     var r82xxTunerType: R82xxTunerType? = null
 
     override var ppmCorrection: Int = 0
@@ -380,7 +381,12 @@ private val usbIFace: UsbIFace) : TunableDevice, I2C {
             input = airCable1In
             writeRegMask(0x05, airCable1In, 0x60)
         }
+        this.tunedFrequency = freq
         println("Set frequency to $freq")
+    }
+
+    override fun getTunedFrequency(): Long {
+        return this.tunedFrequency
     }
 
     override fun setGain(manualGain: Boolean, gain: Int?) {
