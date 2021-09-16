@@ -309,6 +309,14 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace, priva
         println("bias tee now is $enabled")
     }
 
+    fun getTunerSampleRate(): Int {
+        val high = demodReadReg(0x1, 0x9F, 2)
+        val low = demodReadReg(0x1, 0xA1, 2)
+        val ratio = Integer.rotateLeft(high, 16) or low
+        val sampleRate = tunableDevice.rtlXtal() * TWO_22_POW / ratio
+        return sampleRate.roundToInt()
+    }
+
     fun resetBuffer() {
         writeReg(Blocks.USBB, UsbReg.USB_EPA_CTL, 0x1002, 2)
         writeReg(Blocks.USBB, UsbReg.USB_EPA_CTL, 0x0000, 2)
@@ -499,10 +507,10 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace, priva
             val msg = "Invalid sample rate: ${rate}Hz"
             throw IllegalArgumentException(msg)
         }
-        rsampRatio = (tunableDevice.rtlXtal() * 2.0.pow(22) / rate).roundToInt()
+        rsampRatio = (tunableDevice.rtlXtal() * Companion.TWO_22_POW / rate).roundToInt()
         rsampRatio = rsampRatio and 0x0ffffffc
         realRsampRatio = rsampRatio or ((rsampRatio and 0x08000000) shl 1)
-        realRate = (tunableDevice.rtlXtal() * 2.0.pow(22) / realRsampRatio)
+        realRate = (tunableDevice.rtlXtal() * Companion.TWO_22_POW / realRsampRatio)
         println("Exact sample rate set to ${realRate}Hz")
         var tmp = rsampRatio shr 16
         r = (r or demodWriteReg(1, 0x9f, tmp, 2))
@@ -523,7 +531,7 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace, priva
     }
 
     fun setIFFreq(dev: TunableDevice, freq: Long) {
-        val ifFreq = ((freq * 2.0.pow(22)) / dev.getXtalFreq() * (-1)).toInt()
+        val ifFreq = ((freq * Companion.TWO_22_POW) / dev.getXtalFreq() * (-1)).toInt()
         var i = (ifFreq shr 16) and 0x3f
         demodWriteReg(1, 0x19, i, 1)
         i = (ifFreq shr 8) and 0xff
@@ -539,8 +547,9 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace, priva
         setI2cRepeater(1)
         tunableDevice.setFrequency(freq)
         setI2cRepeater(0)
-
     }
+
+    fun getCenterFreq() = tunableDevice.getTunedFrequency()
 
     private fun checkError(result: Int, i: UInt? = null, i2: Int? = null) {
         if (result < 0) {
@@ -626,6 +635,7 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace, priva
             -54, -36, -41, -40, -32, -14, 14, 53,    /* 8 bit signed */
             101, 156, 215, 273, 327, 372, 404, 421    /* 12 bit signed */
         )
+        private val TWO_22_POW: Double = 2.0.pow(22)
     }
 
 

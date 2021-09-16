@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "com.virginiaprivacy"
-version = "0.2.3beta"
+version = "0.2.4"
 
 repositories {
     mavenCentral()
@@ -27,7 +27,7 @@ publishing {
         create<MavenPublication>("release") {
             group = "com.virginiaprivacy.adsbtrack.drivers"
             artifactId = "sdr"
-            version = "0.2.3beta"
+            version = "0.2.4"
             from(components["java"])
         }
     }

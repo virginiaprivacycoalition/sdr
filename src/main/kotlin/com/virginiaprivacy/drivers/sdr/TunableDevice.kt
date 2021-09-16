@@ -23,6 +23,8 @@ interface TunableDevice {
 
     fun setFrequency(freq: Long)
 
+    fun getTunedFrequency(): Long
+
     fun setGain(manualGain: Boolean, gain: Int? = null)
 
     fun writeReg(reg: Int, value: Int)
