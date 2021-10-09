@@ -1,6 +1,9 @@
 package com.virginiaprivacy.drivers.sdr
 
 import com.virginiaprivacy.drivers.sdr.data.Status
+import com.virginiaprivacy.drivers.sdr.plugins.Plugin
+import com.virginiaprivacy.drivers.sdr.plugins.run
+import com.virginiaprivacy.drivers.sdr.plugins.scope
 import com.virginiaprivacy.drivers.sdr.r2xx.R82XX
 import com.virginiaprivacy.drivers.sdr.usb.UsbIFace
 import kotlinx.coroutines.*
@@ -14,9 +17,6 @@ import kotlin.experimental.or
 import kotlin.math.pow
 import kotlin.math.roundToInt
 
-@ExperimentalCoroutinesApi
-@ExperimentalStdlibApi
-@ExperimentalUnsignedTypes
 open class RTLDevice internal constructor(private val usbDevice: UsbIFace, private val bufferSize: Int = DEFAULT_ASYNC_BUF_COUNT) : Closeable {
 
     var devLost: Int = 0
@@ -214,7 +214,7 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace, priva
             if (first.toInt() !in -2048..2047 || second.toInt() !in -2048..2047) {
                 throw IllegalArgumentException()
             }
-            fir[8 + i * 3 / 2] = (first shr 4)
+            fir[8 + i * 3 / 2] = (first.shr(4))
             fir[8 + i * 3 / 2 + 1] =
                 ((first shl 4) or (((second shr 8) and 15u)))
             fir[8 + i * 3 / 2 + 2] = second
@@ -342,53 +342,6 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace, priva
         runningPlugins.add(plugin)
     }
 
-//    suspend fun takeSamples(secondsToSample: Int, outputFile: File) {
-//        if (Status.getIOStatus().value == IOStatus.ACTIVE) {
-//            throw IOException("Device is already in use")
-//        }
-//        val samplesToTake = secondsToSample * tunableDevice.rate
-//        scope.launch { sampleAsync(samplesToTake) }
-//        if (!outputFile.exists()) {
-//            outputFile.createNewFile()
-//        }
-//        var startTime = System.currentTimeMillis()
-//        val bufferedWriter = outputFile.outputStream()
-//        val outputStream = Files.newOutputStream(outputFile.toPath(), StandardOpenOption.APPEND).buffered()
-//        var bytesWritten = 0
-//        flow.collect {
-//            outputStream.write(it)
-//            bytesWritten += it.size
-//            if ((samplesToTake - bytesWritten) % 1000 == 0) {
-//                println("${(samplesToTake - bytesWritten) / 1000 } seconds of sampling left.")
-//            }
-//        }
-//    }
-
-//    private fun sampleAsync(samples: Int) {
-//        var samplesTaken = 0
-//        var samplesRemaining = samples
-//        scope.launch {
-//            allocateBuffersAsync()
-//            while (Status.getIOStatus().value == IOStatus.ACTIVE && samplesRemaining > 0) {
-//                for (i in 0.until(buffer.size)) {
-//                    usbDevice.submitBulkTransfer(i)
-//                    val transferResult = usbDevice.waitForTransferResult()
-//                    val resultSize = transferResult.position()
-//                    val bytes = if (resultSize > samplesRemaining) {
-//                        ByteArray(samplesRemaining.toInt())
-//                    } else {
-//                        ByteArray(resultSize)
-//                    }
-//                    transferResult.rewind()
-//                    transferResult.get(bytes)
-//                    flow.emit(bytes)
-//                    samplesRemaining -= bytes.size
-//                }
-//            }
-//            cancel()
-//        }
-//    }
-
     private fun sampleAsync(samples: Int) {
         var samplesTaken = 0
         var samplesRemaining = samples
@@ -503,14 +456,14 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace, priva
         var rsampRatio = 0
         var realRsampRatio = 0
         var realRate = 0.0
-        if (rate !in 225001..3200000 && rate in 300001..900000) {
+        if (rate !in 225001..3200000 || rate in 300001..900000) {
             val msg = "Invalid sample rate: ${rate}Hz"
             throw IllegalArgumentException(msg)
         }
-        rsampRatio = (tunableDevice.rtlXtal() * Companion.TWO_22_POW / rate).roundToInt()
+        rsampRatio = (tunableDevice.rtlXtal() * TWO_22_POW / rate).roundToInt()
         rsampRatio = rsampRatio and 0x0ffffffc
         realRsampRatio = rsampRatio or ((rsampRatio and 0x08000000) shl 1)
-        realRate = (tunableDevice.rtlXtal() * Companion.TWO_22_POW / realRsampRatio)
+        realRate = (tunableDevice.rtlXtal() * TWO_22_POW / realRsampRatio)
         println("Exact sample rate set to ${realRate}Hz")
         var tmp = rsampRatio shr 16
         r = (r or demodWriteReg(1, 0x9f, tmp, 2))
