@@ -17,6 +17,7 @@ import kotlin.experimental.or
 import kotlin.math.pow
 import kotlin.math.roundToInt
 
+@ExperimentalStdlibApi
 open class RTLDevice internal constructor(private val usbDevice: UsbIFace, private val bufferSize: Int = DEFAULT_ASYNC_BUF_COUNT) : Closeable {
 
     var devLost: Int = 0
@@ -340,12 +341,6 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace, priva
         readAsync()
         plugin.run()
         runningPlugins.add(plugin)
-    }
-
-    private fun sampleAsync(samples: Int) {
-        var samplesTaken = 0
-        var samplesRemaining = samples
-
     }
 
     fun readSync() = flow {
