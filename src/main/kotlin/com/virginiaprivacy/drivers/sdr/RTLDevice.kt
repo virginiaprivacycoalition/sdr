@@ -1,14 +1,14 @@
 package com.virginiaprivacy.drivers.sdr
 
+import com.virginiaprivacy.drivers.sdr.data.Sample
 import com.virginiaprivacy.drivers.sdr.data.Status
 import com.virginiaprivacy.drivers.sdr.plugins.Plugin
-import com.virginiaprivacy.drivers.sdr.plugins.run
-import com.virginiaprivacy.drivers.sdr.plugins.scope
 import com.virginiaprivacy.drivers.sdr.r2xx.R82XX
 import com.virginiaprivacy.drivers.sdr.usb.UsbIFace
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
 import java.io.Closeable
 import java.io.IOException
 import java.nio.ByteBuffer
@@ -17,6 +17,8 @@ import kotlin.experimental.or
 import kotlin.math.pow
 import kotlin.math.roundToInt
 
+@ExperimentalUnsignedTypes
+@ExperimentalCoroutinesApi
 @ExperimentalStdlibApi
 open class RTLDevice internal constructor(private val usbDevice: UsbIFace, private val bufferSize: Int = DEFAULT_ASYNC_BUF_COUNT) : Closeable {
 
@@ -34,7 +36,17 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace, priva
 
     private fun ioStatus() = Status.getIOStatus().value
 
-    val rawFlow = MutableSharedFlow<ByteArray>(extraBufferCapacity = 12)
+    val rawFlow = MutableSharedFlow<ByteArray>(extraBufferCapacity = bufferSize)
+
+    val sampleFlow = rawFlow.map { bytes ->
+        bytes.asList().windowed(2, 2).withIndex().forEach {
+            return@map Sample(it.value[0], it.value[1], it.index)
+        }
+    }
+
+
+
+
 
     private val buffers = ArrayList<ByteBuffer>(bufferSize)
 
@@ -337,9 +349,9 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace, priva
     private val runningPlugins = mutableSetOf<Plugin>()
 
     fun runPlugin(plugin: Plugin) {
-        plugin.setup()
+
         readAsync()
-        plugin.run()
+        plugin.run(this)
         runningPlugins.add(plugin)
     }
 
@@ -348,8 +360,8 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace, priva
         Status.bytesRead = 0
         Status.setIOStatus(IOStatus.ACTIVE)
         while (true) {
-            val bytes = ByteArray(DEFAULT_BUF_LENGTH)
-            val result = usbDevice.bulkTransfer(bytes, DEFAULT_BUF_LENGTH)
+            val bytes = ByteArray(BUF_BYTES)
+            val result = usbDevice.bulkTransfer(bytes, BUF_BYTES)
             if (result == 0) {
                 println("Read empty buffer from device")
                 continue
@@ -375,7 +387,7 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace, priva
                         val b = buffers[it]
                         val bytesRead = b.position()
                         if (bytesRead == 0) {
-                            error("Read 0 bytes on transfer $it")
+                            cancel("Read 0 bytes from buffer $it")
                         }
                         val bytes = ByteArray(bytesRead)
                         b.rewind()
@@ -400,7 +412,7 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace, priva
     private suspend fun allocateBuffersAsync() {
         for (i in 0.until(bufferSize)) {
             val buffer = ByteBuffer.allocateDirect(
-                DEFAULT_BUF_LENGTH
+                BUF_BYTES
             )
             buffers.add(buffer)
             usbDevice.prepareNewBulkTransfer(
@@ -479,7 +491,7 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace, priva
     }
 
     fun setIFFreq(dev: TunableDevice, freq: Long) {
-        val ifFreq = ((freq * Companion.TWO_22_POW) / dev.getXtalFreq() * (-1)).toInt()
+        val ifFreq = ((freq * TWO_22_POW) / dev.getXtalFreq() * (-1)).toInt()
         var i = (ifFreq shr 16) and 0x3f
         demodWriteReg(1, 0x19, i, 1)
         i = (ifFreq shr 8) and 0xff
@@ -524,16 +536,14 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace, priva
         private const val ENDPOINT_IN: Byte = 0x80.toByte()
         private const val ENDPOINT_OUT: Byte = 0x00.toByte()
         const val EEPROM_ADDR = 0xa0
-        const val FIR_LEN = 16
         const val R82XX_IF_FREQ: Long = 3570000
         const val R828D_XTAL_FREQ = 16000000
 
         val CTRL_IN = (REQUEST_TYPE_VENDOR or ENDPOINT_IN).toInt()
         val CTRL_OUT = (REQUEST_TYPE_VENDOR or ENDPOINT_OUT).toInt()
 
-        const val DEFAULT_BUF_COUNT = 15
         const val DEFAULT_ASYNC_BUF_COUNT = 12
-        const val DEFAULT_BUF_LENGTH = 262144
+        const val BUF_BYTES = 131072
 
         val ENDPOINT_TYPES = arrayOf(
             "USB_ENDPOINT_XFER_CONTROL",

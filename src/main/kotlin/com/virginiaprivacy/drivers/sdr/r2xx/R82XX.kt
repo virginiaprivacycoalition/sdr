@@ -4,6 +4,7 @@ import com.virginiaprivacy.drivers.sdr.*
 import com.virginiaprivacy.drivers.sdr.RTLDevice.Companion.DEFAULT_RTL_XTAL_FREQ
 import com.virginiaprivacy.drivers.sdr.RTLDevice.Companion.R828D_XTAL_FREQ
 import com.virginiaprivacy.drivers.sdr.RTLDevice.Companion.R82XX_IF_FREQ
+import com.virginiaprivacy.drivers.sdr.exceptions.PllNotLockedException
 import com.virginiaprivacy.drivers.sdr.r2xx.R82XX.Reg.*
 import com.virginiaprivacy.drivers.sdr.r2xx.R82xxChip.*
 import com.virginiaprivacy.drivers.sdr.usb.UsbIFace
@@ -25,9 +26,9 @@ private val usbIFace: UsbIFace) : TunableDevice, I2C {
     private var filCalCode = 0
     private var input = 0
     private var hasLock: Boolean = false
-    private var initDone: Boolean = false
+    override var initDone: Boolean = false
     private var tunedFrequency: Long = 0
-    var r82xxTunerType: R82xxTunerType? = null
+    private var r82xxTunerType: R82xxTunerType? = null
 
     override var ppmCorrection: Int = 0
     override val ifFrequency = R82XX_IF_FREQ
@@ -246,9 +247,8 @@ private val usbIFace: UsbIFace) : TunableDevice, I2C {
 
     }
 
+    @Throws(PllNotLockedException::class)
     private fun setTVStandard(bw: Int, r82xxTunerType: R82xxTunerType, delsys: Long) {
-        val ifKhz = 3570
-        val filtCalLo = 56000
         val filtGain = 0x10
         val imgR = 0x00
         val filtQ = 0x10
@@ -268,7 +268,7 @@ private val usbIFace: UsbIFace) : TunableDevice, I2C {
 
 
 
-        var needCalibration = true
+        val needCalibration = true
 
         if (needCalibration) {
             repeat(2) { i ->
@@ -277,6 +277,11 @@ private val usbIFace: UsbIFace) : TunableDevice, I2C {
                 writeRegMask(16, 0, 0x03)
                 setPll((56000 * 1000).toLong())
                 if (!hasLock) {
+                    if (i == 2) {
+                        throw PllNotLockedException()
+                    } else {
+                        println("Pll not locked after first attempt. Trying again. . .")
+                    }
                 }
 
                 writeRegMask(11, 16, 0x10)
@@ -350,14 +355,7 @@ private val usbIFace: UsbIFace) : TunableDevice, I2C {
         dev.initBaseband()
         dev.devLost = 0
         dev.setI2cRepeater(1)
-        var tunerFreq = 0
-        //TODO("Check for other types of devices once support for them is added")
-        tunerFreq = when (dev.tunerChip) {
-            Tuner.RTLSDR_TUNER_R828D -> {
-                R828D_XTAL_FREQ
-            }
-            else -> DEFAULT_RTL_XTAL_FREQ
-        }
+
         dev.demodWriteReg(1, 0x0b, 0x1a, 1)
         dev.demodWriteReg(0, 0x08, 0x4d, 1)
         dev.setIFFreq(this, R82XX_IF_FREQ)
@@ -491,7 +489,7 @@ private val usbIFace: UsbIFace) : TunableDevice, I2C {
 
     }
 
-    fun Reg.write(value: Int) {
+    private fun Reg.write(value: Int) {
         this@R82XX.writeRegMask(this.address, value, mask)
     }
 
