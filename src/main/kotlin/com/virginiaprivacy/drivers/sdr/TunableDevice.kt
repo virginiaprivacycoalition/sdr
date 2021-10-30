@@ -32,4 +32,6 @@ interface TunableDevice {
     fun read(reg: Int, len: Int): ByteArray
 
     fun writeRegMask(reg: Int, value: Int, bitMask: Int)
+
+    fun init(dev: RTLDevice)
 }

@@ -17,6 +17,8 @@ import kotlin.experimental.and
 class R82XX @ExperimentalStdlibApi constructor(
 private val usbIFace: UsbIFace) : TunableDevice, I2C {
 
+
+
     override val dev = RTLDevice(usbIFace)
     override val config = R82xxConfig(Tuner.RTLSDR_TUNER_R820T)
     private var xtalCapSel = R82xxXtalCapValue.XTAL_HIGH_CAP_0P
@@ -28,14 +30,11 @@ private val usbIFace: UsbIFace) : TunableDevice, I2C {
     private var initDone: Boolean = false
     private var tunedFrequency: Long = 0
     var r82xxTunerType: R82xxTunerType? = null
-
     override var ppmCorrection: Int = 0
     override val ifFrequency = R82XX_IF_FREQ
     override var rate: Int = 0
     override var directSampling: Boolean = false
     override var bandwidth: Long = 0
-
-
     private var delsys: R82xxDeliverySystem? = null
 
     private fun shadowStore(reg: Int, value: ByteArray, len: Int) {
@@ -107,6 +106,14 @@ private val usbIFace: UsbIFace) : TunableDevice, I2C {
         if (rc < 0) return
         val value2 = (rc and bitMask.inv()) or (value and bitMask)
         return r82xxWrite(reg, byteArrayOf(value2.toUByte().toByte()), 1)
+    }
+
+    override fun init(dev: RTLDevice) {
+        xtalCapSel = R82xxXtalCapValue.XTAL_HIGH_CAP_0P
+        r82xxWrite(0x05, initArray.map { it.toByte() }.toByteArray(), initArray.size)
+        setTVStandard(3, R82xxTunerType.TUNER_DIGITAL_TV, 0)
+        sysFreqSelect(0)
+        initDone = true
     }
 
     private fun bitRev(byte: UByte): Int {
@@ -332,46 +339,6 @@ private val usbIFace: UsbIFace) : TunableDevice, I2C {
             writeRegMask(0x1a, 0x20, 0x30)
     }
 
-//    fun pllLocked(): Boolean {
-//        read(2, 1)
-//    }
-
-
-    fun setup() {
-        if (dev.writeReg(
-                RTLDevice.Companion.Blocks.USBB,
-                RTLDevice.Companion.UsbReg.USB_SYSCTL,
-                0x09,
-                1
-            ) < 0
-        ) {
-            kotlin.error("Reset device")
-        }
-        dev.initBaseband()
-        dev.devLost = 0
-        dev.setI2cRepeater(1)
-        var tunerFreq = 0
-        //TODO("Check for other types of devices once support for them is added")
-        tunerFreq = when (dev.tunerChip) {
-            Tuner.RTLSDR_TUNER_R828D -> {
-                R828D_XTAL_FREQ
-            }
-            else -> DEFAULT_RTL_XTAL_FREQ
-        }
-        dev.demodWriteReg(1, 0x0b, 0x1a, 1)
-        dev.demodWriteReg(0, 0x08, 0x4d, 1)
-        dev.setIFFreq(this, R82XX_IF_FREQ)
-        dev.demodWriteReg(1, 0x15, 0x01, 1)
-        xtalCapSel = R82xxXtalCapValue.XTAL_HIGH_CAP_0P
-        r82xxWrite(0x05, initArray.map { it.toByte() }.toByteArray(), initArray.size)
-        setTVStandard(3, R82xxTunerType.TUNER_DIGITAL_TV, 0)
-        sysFreqSelect(0)
-        this.initDone = true
-        dev.setI2cRepeater(0)
-        println("Device configured: " +
-                "${this.usbIFace.productName} by ${this.usbIFace.manufacturerName}")
-    }
-
     override fun setFrequency(freq: Long) {
         val loFreq = freq + this.ifFrequency
         setMux(loFreq)
@@ -425,6 +392,10 @@ private val usbIFace: UsbIFace) : TunableDevice, I2C {
 
     private fun error(text: String) {
         println("ERROR: $text")
+    }
+
+    fun Reg.write(value: Int) {
+        this@R82XX.writeRegMask(this.address, value, mask)
     }
 
     enum class Reg(val address: Int, val mask: Int) {
@@ -490,11 +461,6 @@ private val usbIFace: UsbIFace) : TunableDevice, I2C {
 
 
     }
-
-    fun Reg.write(value: Int) {
-        this@R82XX.writeRegMask(this.address, value, mask)
-    }
-
 
     companion object {
 

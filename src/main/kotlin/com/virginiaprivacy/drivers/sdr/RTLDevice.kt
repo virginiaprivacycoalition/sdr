@@ -17,11 +17,18 @@ import kotlin.experimental.or
 import kotlin.math.pow
 import kotlin.math.roundToInt
 
+@ExperimentalUnsignedTypes
+@ExperimentalCoroutinesApi
+@ExperimentalStdlibApi
 open class RTLDevice internal constructor(private val usbDevice: UsbIFace, private val bufferSize: Int = DEFAULT_ASYNC_BUF_COUNT) : Closeable {
 
     var devLost: Int = 0
 
     val product by usbDevice::productName
+
+    val serial by usbDevice::serialNumber
+
+    val manufacturer by usbDevice::manufacturerName
 
     val tunerChip: Tuner by lazy { Tuner.tunerType(this) }
 
@@ -302,6 +309,32 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace, priva
         demodWriteReg(0, 0x0d, 0x83, 1)
     }
 
+    fun setup() {
+        if (writeReg(
+                Blocks.USBB,
+                UsbReg.USB_SYSCTL,
+                0x09,
+                1
+            ) < 0
+        ) {
+            error("Reset device")
+        }
+        initBaseband()
+        devLost = 0
+        setI2cRepeater(1)
+
+        // For now and for easier testing, just assume the device is an R820T
+        demodWriteReg(1, 0xb1, 0x1a, 1)
+        demodWriteReg(0, 0x08, 0x4d, 1)
+        setIFFreq(R82XX_IF_FREQ)
+        demodWriteReg(1, 0x15, 0x01, 1)
+
+        tunableDevice.init(this)
+        setI2cRepeater(0)
+
+        println("Device successfully configured: $product by $manufacturer with serial no $serial")
+    }
+
     fun setBiasTee(enabled: Boolean) {
         setgpioOutput(0)
         val intValue = if (enabled) 1 else 0
@@ -336,7 +369,6 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace, priva
     private val runningPlugins = mutableSetOf<Plugin>()
 
     fun runPlugin(plugin: Plugin) {
-        plugin.setup()
         readAsync()
         plugin.run()
         runningPlugins.add(plugin)
@@ -483,8 +515,8 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace, priva
         demodWriteReg(0, 0x19, i, 1)
     }
 
-    fun setIFFreq(dev: TunableDevice, freq: Long) {
-        val ifFreq = ((freq * Companion.TWO_22_POW) / dev.getXtalFreq() * (-1)).toInt()
+    fun setIFFreq(freq: Long) {
+        val ifFreq = ((freq * TWO_22_POW) / tunableDevice.getXtalFreq() * (-1)).toInt()
         var i = (ifFreq shr 16) and 0x3f
         demodWriteReg(1, 0x19, i, 1)
         i = (ifFreq shr 8) and 0xff
@@ -495,7 +527,7 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace, priva
 
     fun setCenterFreq(freq: Long) {
         if (tunableDevice.directSampling) {
-            setIFFreq(tunableDevice, freq)
+            setIFFreq(freq)
         }
         setI2cRepeater(1)
         tunableDevice.setFrequency(freq)
@@ -518,7 +550,6 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace, priva
         fun getDevice(usbIFace: UsbIFace): RTLDevice {
             usbIFace.claimInterface()
             val dev = R82XX(usbIFace)
-            dev.setup()
             dev.dev.tunableDevice = dev
             return dev.dev
         }
