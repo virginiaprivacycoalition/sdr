@@ -37,11 +37,3 @@ fun main() {
 
 }
 
-
-fun interface Plugin {
-
-    fun processSignalBuffer(buf: ByteArray): Any?
-
-}
-
-
