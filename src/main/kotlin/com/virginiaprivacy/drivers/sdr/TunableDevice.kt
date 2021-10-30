@@ -9,6 +9,7 @@ interface TunableDevice {
 
     val config: RTLConfig
     var ppmCorrection: Int
+    var initDone: Boolean
     val ifFrequency: Long
 
     var rate: Int

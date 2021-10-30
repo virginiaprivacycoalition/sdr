@@ -4,6 +4,7 @@ import com.virginiaprivacy.drivers.sdr.*
 import com.virginiaprivacy.drivers.sdr.RTLDevice.Companion.DEFAULT_RTL_XTAL_FREQ
 import com.virginiaprivacy.drivers.sdr.RTLDevice.Companion.R828D_XTAL_FREQ
 import com.virginiaprivacy.drivers.sdr.RTLDevice.Companion.R82XX_IF_FREQ
+import com.virginiaprivacy.drivers.sdr.exceptions.PllNotLockedException
 import com.virginiaprivacy.drivers.sdr.r2xx.R82XX.Reg.*
 import com.virginiaprivacy.drivers.sdr.r2xx.R82xxChip.*
 import com.virginiaprivacy.drivers.sdr.usb.UsbIFace
@@ -253,9 +254,8 @@ private val usbIFace: UsbIFace) : TunableDevice, I2C {
 
     }
 
+    @Throws(PllNotLockedException::class)
     private fun setTVStandard(bw: Int, r82xxTunerType: R82xxTunerType, delsys: Long) {
-        val ifKhz = 3570
-        val filtCalLo = 56000
         val filtGain = 0x10
         val imgR = 0x00
         val filtQ = 0x10
@@ -275,7 +275,7 @@ private val usbIFace: UsbIFace) : TunableDevice, I2C {
 
 
 
-        var needCalibration = true
+        val needCalibration = true
 
         if (needCalibration) {
             repeat(2) { i ->
@@ -284,6 +284,11 @@ private val usbIFace: UsbIFace) : TunableDevice, I2C {
                 writeRegMask(16, 0, 0x03)
                 setPll((56000 * 1000).toLong())
                 if (!hasLock) {
+                    if (i == 2) {
+                        throw PllNotLockedException()
+                    } else {
+                        println("Pll not locked after first attempt. Trying again. . .")
+                    }
                 }
 
                 writeRegMask(11, 16, 0x10)
@@ -461,6 +466,7 @@ private val usbIFace: UsbIFace) : TunableDevice, I2C {
 
 
     }
+
 
     companion object {
 
