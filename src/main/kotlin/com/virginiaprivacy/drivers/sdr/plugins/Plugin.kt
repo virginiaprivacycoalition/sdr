@@ -31,17 +31,4 @@ fun Plugin.run() {
     }
 }
 
-val testPlugin = Plugin { null }
-
-fun main() {
-
-}
-
-
-fun interface Plugin {
-
-    fun processSignalBuffer(buf: ByteArray): Any?
-
-}
-
 

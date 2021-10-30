@@ -28,7 +28,7 @@ private val usbIFace: UsbIFace) : TunableDevice, I2C {
     private var filCalCode = 0
     private var input = 0
     private var hasLock: Boolean = false
-    private var initDone: Boolean = false
+    override var initDone: Boolean = false
     private var tunedFrequency: Long = 0
     var r82xxTunerType: R82xxTunerType? = null
     override var ppmCorrection: Int = 0
