@@ -31,9 +31,4 @@ fun Plugin.run() {
     }
 }
 
-val testPlugin = Plugin { null }
-
-fun main() {
-
-}
 
