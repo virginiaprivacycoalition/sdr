@@ -11,7 +11,7 @@ import java.util.concurrent.Executors
 fun interface Plugin {
 
 
-    fun processSignalBuffer(buf: ByteArray)
+    suspend fun processSignalBuffer(buf: ByteArray)
 
 }
 
@@ -22,11 +22,13 @@ val Plugin.scope: CoroutineScope
     get() = CoroutineScope(Executors.newSingleThreadExecutor().asCoroutineDispatcher())
 
 fun Plugin.run() {
-    println("${this::class.qualifiedName} setup complete. . . Now running")
+    println("${this::class.qualifiedName} setup complete. . . Now running. test version")
     scope.launch {
         device.rawFlow
             .collect {
-                processSignalBuffer(buf = it)
+                launch {
+                    processSignalBuffer(buf = it)
+                }
             }
     }
 }

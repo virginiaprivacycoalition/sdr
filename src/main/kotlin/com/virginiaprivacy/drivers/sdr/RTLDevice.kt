@@ -421,6 +421,7 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace, priva
                         }
                         val bytes = ByteArray(bytesRead)
                         b.rewind()
+
                         b.get(bytes)
                         rawFlow.emit(bytes)
                         b.clear()
@@ -573,7 +574,7 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace, priva
         val CTRL_OUT = (REQUEST_TYPE_VENDOR or ENDPOINT_OUT).toInt()
 
         const val DEFAULT_ASYNC_BUF_COUNT = 12
-        const val BUF_BYTES = 131072
+        const val BUF_BYTES = 262144
 
         val ENDPOINT_TYPES = arrayOf(
             "USB_ENDPOINT_XFER_CONTROL",
