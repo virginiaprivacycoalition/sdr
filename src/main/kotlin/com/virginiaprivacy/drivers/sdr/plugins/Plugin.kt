@@ -11,7 +11,7 @@ import java.util.concurrent.Executors
 fun interface Plugin {
 
 
-    suspend fun processSignalBuffer(buf: ByteArray)
+    fun processSignalBuffer(buf: ByteArray)
 
 }
 
@@ -26,9 +26,7 @@ fun Plugin.run() {
     scope.launch {
         device.rawFlow
             .collect {
-                launch {
-                    processSignalBuffer(buf = it)
-                }
+                processSignalBuffer(buf = it)
             }
     }
 }
