@@ -1,11 +1,11 @@
 plugins {
-    kotlin("jvm") version "1.5.31"
+    kotlin("jvm") version "1.6.0"
     java
     id("maven-publish")
 }
 
 group = "com.virginiaprivacy"
-version = "0.3.0"
+version = "0.3.1"
 
 repositories {
     mavenCentral()
@@ -27,7 +27,7 @@ publishing {
         create<MavenPublication>("release") {
             group = "com.virginiaprivacy.adsbtrack.drivers"
             artifactId = "sdr"
-            version = "0.3.0"
+            version = "0.3.1"
             from(components["java"])
         }
     }
