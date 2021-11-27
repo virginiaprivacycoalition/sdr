@@ -550,12 +550,6 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace,
 
     companion object {
 
-        fun getDevice(usbIFace: UsbIFace): RTLDevice {
-            usbIFace.claimInterface()
-            val dev = R82XX(usbIFace)
-            dev.dev.tunableDevice = dev
-            return dev.dev
-        }
 
         const val CTRL_TIMEOUT = 300
         const val DEFAULT_RTL_XTAL_FREQ = 288000000
