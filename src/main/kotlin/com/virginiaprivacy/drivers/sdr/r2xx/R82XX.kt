@@ -13,14 +13,12 @@ import java.io.IOException
 import kotlin.experimental.and
 
 @ExperimentalCoroutinesApi
-@ExperimentalStdlibApi
 @ExperimentalUnsignedTypes
-class R82XX @ExperimentalStdlibApi constructor(
-private val usbIFace: UsbIFace) : TunableDevice, I2C {
+class R82XX  constructor(
+override val dev: RTLDevice) : TunableDevice, I2C {
 
 
 
-    override val dev = RTLDevice(usbIFace)
     override val config = R82xxConfig(Tuner.RTLSDR_TUNER_R820T)
     private var xtalCapSel = R82xxXtalCapValue.XTAL_HIGH_CAP_0P
     private var regs = IntArray(NUM_REGS)

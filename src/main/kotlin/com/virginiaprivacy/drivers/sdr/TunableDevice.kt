@@ -3,7 +3,6 @@ package com.virginiaprivacy.drivers.sdr
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 
 @ExperimentalCoroutinesApi
-@ExperimentalStdlibApi
 @ExperimentalUnsignedTypes
 interface TunableDevice {
 

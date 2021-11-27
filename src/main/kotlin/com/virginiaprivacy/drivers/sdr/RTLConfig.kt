@@ -3,7 +3,6 @@ package com.virginiaprivacy.drivers.sdr
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 
 @ExperimentalCoroutinesApi
-@ExperimentalStdlibApi
 @ExperimentalUnsignedTypes
 open class RTLConfig(
     var maxI2cMsgLen: Int = 8,

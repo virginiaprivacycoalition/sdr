@@ -5,7 +5,6 @@ import com.virginiaprivacy.drivers.sdr.Tuner
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 
 @ExperimentalCoroutinesApi
-@ExperimentalStdlibApi
 @ExperimentalUnsignedTypes
 class R82xxConfig constructor(
     tuner: Tuner,

@@ -4,7 +4,7 @@ import com.virginiaprivacy.drivers.sdr.r2xx.R82xxChip
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 
 @ExperimentalCoroutinesApi
-@ExperimentalStdlibApi
+
 enum class Tuner(
     val i2cAddress: Int,
     val checkAddress: Int,
@@ -22,7 +22,6 @@ enum class Tuner(
 
     @ExperimentalUnsignedTypes
     @ExperimentalCoroutinesApi
-    @ExperimentalStdlibApi
     companion object {
 
         fun tunerType(device: RTLDevice): Tuner =
