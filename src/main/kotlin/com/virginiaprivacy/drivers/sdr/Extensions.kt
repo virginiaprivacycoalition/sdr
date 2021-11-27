@@ -28,7 +28,6 @@ fun String.precision(decimals: Int = 2): String = "%.${decimals}s".format(this)
 val Plugin.scope: CoroutineScope
     get() = CoroutineScope(Executors.newSingleThreadExecutor().asCoroutineDispatcher())
 
-@ExperimentalStdlibApi
 fun Plugin.run(device: RTLDevice) {
     println("${this::class.qualifiedName} setup complete. . . Now running")
     scope.launch {

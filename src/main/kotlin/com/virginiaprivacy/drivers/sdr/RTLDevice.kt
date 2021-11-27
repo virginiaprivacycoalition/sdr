@@ -3,7 +3,6 @@ package com.virginiaprivacy.drivers.sdr
 import com.virginiaprivacy.drivers.sdr.data.Sample
 import com.virginiaprivacy.drivers.sdr.data.Status
 import com.virginiaprivacy.drivers.sdr.plugins.Plugin
-import com.virginiaprivacy.drivers.sdr.plugins.run
 import com.virginiaprivacy.drivers.sdr.r2xx.R82XX
 import com.virginiaprivacy.drivers.sdr.usb.UsbIFace
 import kotlinx.coroutines.*
@@ -20,8 +19,9 @@ import kotlin.math.roundToInt
 
 @ExperimentalUnsignedTypes
 @ExperimentalCoroutinesApi
-@ExperimentalStdlibApi
-open class RTLDevice internal constructor(private val usbDevice: UsbIFace, private val bufferSize: Int = DEFAULT_ASYNC_BUF_COUNT) : Closeable {
+open class RTLDevice internal constructor(private val usbDevice: UsbIFace,
+                                          private val bufferSize: Int = BUF_BYTES,
+                                          private val numBuffers: Int = DEFAULT_ASYNC_BUF_COUNT) : Closeable {
 
     var devLost: Int = 0
 
@@ -41,7 +41,7 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace, priva
 
     private fun ioStatus() = Status.getIOStatus().value
 
-    val rawFlow = MutableSharedFlow<ByteArray>(extraBufferCapacity = bufferSize)
+    val rawFlow = MutableSharedFlow<ByteArray>(extraBufferCapacity = numBuffers)
 
     val sampleFlow = rawFlow.map { bytes ->
         bytes.asList().windowed(2, 2).withIndex().forEach {
@@ -49,11 +49,7 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace, priva
         }
     }
 
-
-
-
-
-    private val buffers = ArrayList<ByteBuffer>(bufferSize)
+    private val buffers = ArrayList<ByteBuffer>(numBuffers)
 
     fun writeRegMask(reg: Int, value: Int, bitMask: Int) {
         tunableDevice.writeRegMask(reg, value, bitMask)
@@ -390,8 +386,8 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace, priva
         Status.bytesRead = 0
         Status.setIOStatus(IOStatus.ACTIVE)
         while (true) {
-            val bytes = ByteArray(BUF_BYTES)
-            val result = usbDevice.bulkTransfer(bytes, BUF_BYTES)
+            val bytes = ByteArray(bufferSize)
+            val result = usbDevice.bulkTransfer(bytes, bufferSize)
             if (result == 0) {
                 println("Read empty buffer from device")
                 continue
@@ -441,9 +437,9 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace, priva
 
 
     private suspend fun allocateBuffersAsync() {
-        for (i in 0.until(bufferSize)) {
+        for (i in 0.until(numBuffers)) {
             val buffer = ByteBuffer.allocateDirect(
-                BUF_BYTES
+                bufferSize
             )
             buffers.add(buffer)
             usbDevice.prepareNewBulkTransfer(
@@ -637,4 +633,5 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace, priva
 }
 
 private infix fun Short.shr(i: Int): Short = (this.toInt() shr i).toShort()
+
 
