@@ -403,29 +403,23 @@ open class RTLDevice(private val usbDevice: UsbIFace,
         Status.setIOStatus(IOStatus.ACTIVE)
         scope.launch {
             allocateBuffersAsync()
-
-            var bufIndex = 0
             while (this.isActive) {
                 if (ioStatus() == IOStatus.ACTIVE) {
-                    usbDevice.submitBulkTransfer(buffers[bufIndex])
-                    usbDevice.waitForTransferResult().let {
-                        val b = buffers[it]
-                        val bytesRead = b.position()
-                        if (bytesRead == 0) {
-                            cancel("Read 0 bytes from buffer $it")
+                    buffers.forEachIndexed { i, buf ->
+                        usbDevice.submitBulkTransfer(buf)
+                        usbDevice.waitForTransferResult().let {
+                            val bytesRead = buf.position()
+                            if (bytesRead == 0) {
+                                cancel("Read 0 bytes from buffer $it")
+                            }
+                            val bytes = ByteArray(bytesRead)
+                            buf.rewind()
+
+                            buf.get(bytes)
+                            rawFlow.emit(bytes)
+                            buf.clear()
+                            Status.bytesRead += (bytesRead)
                         }
-                        val bytes = ByteArray(bytesRead)
-                        b.rewind()
-
-                        b.get(bytes)
-                        rawFlow.emit(bytes)
-                        b.clear()
-                        Status.bytesRead += (bytesRead)
-                    }
-
-                    bufIndex++
-                    if (bufIndex == DEFAULT_ASYNC_BUF_COUNT) {
-                        bufIndex = 0
                     }
                 } else {
                     cancel()
