@@ -3,7 +3,6 @@ package com.virginiaprivacy.drivers.sdr
 import com.virginiaprivacy.drivers.sdr.data.Sample
 import com.virginiaprivacy.drivers.sdr.data.Status
 import com.virginiaprivacy.drivers.sdr.plugins.Plugin
-import com.virginiaprivacy.drivers.sdr.r2xx.R82XX
 import com.virginiaprivacy.drivers.sdr.usb.UsbIFace
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -19,7 +18,7 @@ import kotlin.math.roundToInt
 
 @ExperimentalUnsignedTypes
 @ExperimentalCoroutinesApi
-open class RTLDevice internal constructor(private val usbDevice: UsbIFace,
+open class RTLDevice(private val usbDevice: UsbIFace,
                                           private val bufferSize: Int = BUF_BYTES,
                                           private val numBuffers: Int = DEFAULT_ASYNC_BUF_COUNT) : Closeable {
 
@@ -615,6 +614,7 @@ open class RTLDevice internal constructor(private val usbDevice: UsbIFace,
             101, 156, 215, 273, 327, 372, 404, 421    /* 12 bit signed */
         )
         private val TWO_22_POW: Double = 2.0.pow(22)
+
     }
 
 
