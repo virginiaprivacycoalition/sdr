@@ -50,6 +50,8 @@ open class RTLDevice(private val usbDevice: UsbIFace,
 
     private val buffers = ArrayList<ByteBuffer>(numBuffers)
 
+    private var readJob: Job? = null
+
     fun writeRegMask(reg: Int, value: Int, bitMask: Int) {
         tunableDevice.writeRegMask(reg, value, bitMask)
     }
@@ -401,7 +403,7 @@ open class RTLDevice(private val usbDevice: UsbIFace,
         Status.startTime = System.currentTimeMillis()
         Status.bytesRead = 0
         Status.setIOStatus(IOStatus.ACTIVE)
-        scope.launch {
+        readJob =  scope.launch {
             allocateBuffersAsync()
             while (this.isActive) {
                 if (ioStatus() == IOStatus.ACTIVE) {
@@ -521,13 +523,21 @@ open class RTLDevice(private val usbDevice: UsbIFace,
         demodWriteReg(1, 0x1b, i, 1)
     }
 
-    fun setCenterFreq(freq: Long) {
+    suspend fun setCenterFreq(freq: Long) {
+        if (ioStatus() == IOStatus.ACTIVE) {
+            readJob?.cancelAndJoin()
+        }
         if (tunableDevice.directSampling) {
             setIFFreq(freq)
         }
         setI2cRepeater(1)
         tunableDevice.setFrequency(freq)
         setI2cRepeater(0)
+        readAsync()
+    }
+
+    fun setCenterFreqAsync(freq: Long) {
+        scope.launch { setCenterFreq(freq) }
     }
 
     fun getCenterFreq() = tunableDevice.getTunedFrequency()
