@@ -1,22 +1,19 @@
 package com.virginiaprivacy.drivers.sdr.r2xx
 
 import com.virginiaprivacy.drivers.sdr.*
-import com.virginiaprivacy.drivers.sdr.RTLDevice.Companion.DEFAULT_RTL_XTAL_FREQ
-import com.virginiaprivacy.drivers.sdr.RTLDevice.Companion.R828D_XTAL_FREQ
 import com.virginiaprivacy.drivers.sdr.RTLDevice.Companion.R82XX_IF_FREQ
 import com.virginiaprivacy.drivers.sdr.exceptions.PllNotLockedException
 import com.virginiaprivacy.drivers.sdr.r2xx.R82XX.Reg.*
-import com.virginiaprivacy.drivers.sdr.r2xx.R82xxChip.*
-import com.virginiaprivacy.drivers.sdr.usb.UsbIFace
+import com.virginiaprivacy.drivers.sdr.r2xx.R82xxChip.CHIP_R828D
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import java.io.IOException
+import java.lang.RuntimeException
 import kotlin.experimental.and
 
 @ExperimentalCoroutinesApi
 @ExperimentalUnsignedTypes
 class R82XX  constructor(
 override val dev: RTLDevice) : TunableDevice, I2C {
-
 
 
     override val config = R82xxConfig(Tuner.RTLSDR_TUNER_R820T)
@@ -27,6 +24,21 @@ override val dev: RTLDevice) : TunableDevice, I2C {
     private var input = 0
     private var hasLock: Boolean = false
     override var initDone: Boolean = false
+    private var _currentFrequencyRange: R82xxFrequencyRange? = null
+    private var currentFrequencyRange: R82xxFrequencyRange?
+        get() = _currentFrequencyRange
+        set(value) {
+            value?.let {
+                if (value == _currentFrequencyRange) return
+                R82XXRegister.OPEN_D.write(it.openD)
+                R82XXRegister.RFMUX.write(it.rfMuxPloy)
+                R82XXRegister.TF_BAND.write(it.tfC)
+                R82XXRegister.XTAL_CAP.write(it.xtalCap0p)
+                R82XXRegister.MIXER_BUFFER_POWER.write(0x00)
+                R82XXRegister.IF_FILTER_POWER.write(0x00)
+            }
+            _currentFrequencyRange = value
+        }
     private var tunedFrequency: Long = 0
     var r82xxTunerType: R82xxTunerType? = null
     override var ppmCorrection: Int = 0
@@ -35,6 +47,11 @@ override val dev: RTLDevice) : TunableDevice, I2C {
     override var directSampling: Boolean = false
     override var bandwidth: Long = 0
     private var delsys: R82xxDeliverySystem? = null
+    private val mShadowRegister = intArrayOf(
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x83, 0x32, 0x75, 0xC0, 0x40, 0xD6, 0x6C, 0xF5,
+        0x63, 0x75, 0x68, 0x6C, 0x83, 0x80, 0x00, 0x0F, 0x00, 0xC0, 0x30, 0x48, 0xCC, 0x60, 0x00, 0x54, 0xAE, 0x4A,
+        0xC0
+    )
 
     private fun shadowStore(reg: Int, value: ByteArray, len: Int) {
         var r = reg - REG_SHADOW_START
@@ -108,6 +125,19 @@ override val dev: RTLDevice) : TunableDevice, I2C {
     }
 
     override fun init(dev: RTLDevice) {
+
+        // disable 0-if mode
+        dev.demodWriteReg(1, 0xb1, 0x1a, 1)
+
+        // enable in-phase ADC
+        dev.demodWriteReg(0, 0x08, 0x4D, 1)
+
+        dev.setIFFreq(R82XX_IF_FREQ)
+
+        // enable spectrum inversion
+        dev.demodWriteReg(1, 0x15, 0x01, 1)
+
+
         xtalCapSel = R82xxXtalCapValue.XTAL_HIGH_CAP_0P
         r82xxWrite(0x05, initArray.map { it.toByte() }.toByteArray(), initArray.size)
         setTVStandard(3, R82xxTunerType.TUNER_DIGITAL_TV, 0)
@@ -134,15 +164,8 @@ override val dev: RTLDevice) : TunableDevice, I2C {
     }
 
     private fun setMux(freq: Long) {
-        frequencyRanges.firstOrNull { (freq / 1000000) < it.freq }
-        val range =
-            frequencyRanges.firstOrNull { (freq / 1000000) < it.freq } ?: frequencyRanges.last()
-        OPEN_D.write(range.openD)
-        RFMUX.write(range.rfMuxPloy)
-        writeReg(0x1b, range.tfC)
-        XTAL_CAP.write(range.xtalCap0p or 0x00)
-        MIXER_BUFFER_POWER.write(0x00)
-        IF_FILTER_POWER.write(0x00)
+        val mhz = (freq * 4295).shr(32)
+        currentFrequencyRange = frequencyRanges[getFrequencyIndex(mhz)]
     }
 
     fun standBy() {
@@ -175,9 +198,9 @@ override val dev: RTLDevice) : TunableDevice, I2C {
         val pllRef = config.xtal
         val refKhz = (config.xtal + 500) / 1000
 
-        PLL_REFDIV.write(0x00)
-        PLL_AUTOTUNE_CLOCKRATE.write(0x00)
-        VCO_CURRENT.write(0x80)
+        R82XXRegister.PLL_REFDIV.write(0x00)
+        R82XXRegister.PLL_AUTOTUNE_CLOCKRATE.write(0x00)
+        R82XXRegister.VCO_CURRENT.write(0x80)
         while (mixDiv <= 64) {
             if ((freqKhz * mixDiv >= vcoMin) && (freqKhz * mixDiv < vcoMax)) {
                 divBuf = mixDiv
@@ -401,7 +424,12 @@ override val dev: RTLDevice) : TunableDevice, I2C {
         this@R82XX.writeRegMask(this.address, value, mask)
     }
 
-    enum class Reg(val address: Int, val mask: Int) {
+    sealed interface Reg {
+        val address: Int
+        val mask: Int
+    }
+
+    enum class R82XXRegister(override val address: Int, override val mask: Int): Reg {
 
         /**
          * LNA gain mode switch
@@ -420,27 +448,27 @@ override val dev: RTLDevice) : TunableDevice, I2C {
          * 00: Tracking filter on
          * 01: Bypass tracking filter
          */
-        RFMUX(0x1A, 0xC3),
+        RFMUX(0x1a, 0xc3),
 
         /**
          * Internal xtal cap settings
          * 00: no cap, 01: 10pF
          * 10: 20pF, 11: 30pF
          */
-        XTAL_CAP(0x10, 0x0B),
+        XTAL_CAP(0x10, 0x0b),
 
         /**
          * Mixer buffer power
          * 0: off 1: on
          */
-        MIXER_BUFFER_POWER(0x08, 0x3F),
+        MIXER_BUFFER_POWER(0x08, 0x3f),
 
         /**
          * IF filter power
          * 0: filter on
          * 1: off
          */
-        IF_FILTER_POWER(0x09, 0x3F),
+        IF_FILTER_POWER(0x09, 0x3f),
 
         /**
          * PLL reference frequency divider
@@ -462,8 +490,11 @@ override val dev: RTLDevice) : TunableDevice, I2C {
          */
         VCO_CURRENT(0x12, 0xE0),
 
+        TF_BAND(0x01b, 0x00)
+
 
     }
+
 
 
     companion object {
@@ -479,6 +510,85 @@ override val dev: RTLDevice) : TunableDevice, I2C {
         const val FILT_HP_BW2 = 380000
 
 //        private const val DIVIDER_0 =
+
+        val freqToIndex = arrayOf( /* 50 */ 1,/* 51 */ 1,/* 52 */ 1,/* 53 */ 1,/* 54 */ 1,
+            /* 55 */ 2,/* 56 */ 2,/* 57 */ 2,/* 58 */ 2,/* 59 */ 2,
+            /* 60 */ 3,/* 61 */ 3,/* 62 */ 3,/* 63 */ 3,/* 64 */ 3,
+            /* 65 */ 4,/* 66 */ 4,/* 67 */ 4,/* 68 */ 4,/* 69 */ 4,
+            /* 70 */ 5,/* 71 */ 5,/* 72 */ 5,/* 73 */ 5,/* 74 */ 5,
+            /* 75 */ 6,/* 76 */ 6,/* 77 */ 6,/* 78 */ 6,/* 79 */ 6,
+            /* 80 */ 7,/* 81 */ 7,/* 82 */ 7,/* 83 */ 7,/* 84 */ 7,/* 85 */ 7,/* 86 */ 7,/* 87 */ 7,/* 88 */ 7,/* 89 */ 7,
+            /* 90 */ 8,/* 91 */ 8,/* 92 */ 8,/* 93 */ 8,/* 94 */ 8,/* 95 */ 8,/* 96 */ 8,/* 97 */ 8,/* 98 */ 8,/* 99 */ 8,
+            /* 100 */ 9,/* 101 */ 9,/* 102 */ 9,/* 103 */ 9,/* 104 */ 9,/* 105 */ 9,/* 106 */ 9,/* 107 */ 9,/* 108 */ 9,/* 109 */ 9,
+            /* 110 */ 10,/* 111 */ 10,/* 112 */ 10,/* 113 */ 10,/* 114 */ 10,/* 115 */ 10,/* 116 */ 10,/* 117 */ 10,/* 118 */ 10,/* 119 */ 10,
+            /* 120 */ 11,/* 121 */ 11,/* 122 */ 11,/* 123 */ 11,/* 124 */ 11,/* 125 */ 11,/* 126 */ 11,/* 127 */ 11,/* 128 */ 11,/* 129 */ 11,
+            /* 130 */ 11,/* 131 */ 11,/* 132 */ 11,/* 133 */ 11,/* 134 */ 11,/* 135 */ 11,/* 136 */ 11,/* 137 */ 11,/* 138 */ 11,/* 139 */ 11,
+            /* 140 */ 12,/* 141 */ 12,/* 142 */ 12,/* 143 */ 12,/* 144 */ 12,/* 145 */ 12,/* 146 */ 12,/* 147 */ 12,/* 148 */ 12,/* 149 */ 12,
+            /* 150 */ 12,/* 151 */ 12,/* 152 */ 12,/* 153 */ 12,/* 154 */ 12,/* 155 */ 12,/* 156 */ 12,/* 157 */ 12,/* 158 */ 12,/* 159 */ 12,
+            /* 160 */ 12,/* 161 */ 12,/* 162 */ 12,/* 163 */ 12,/* 164 */ 12,/* 165 */ 12,/* 166 */ 12,/* 167 */ 12,/* 168 */ 12,/* 169 */ 12,
+            /* 170 */ 12,/* 171 */ 12,/* 172 */ 12,/* 173 */ 12,/* 174 */ 12,/* 175 */ 12,/* 176 */ 12,/* 177 */ 12,/* 178 */ 12,/* 179 */ 12,
+            /* 180 */ 13,/* 181 */ 13,/* 182 */ 13,/* 183 */ 13,/* 184 */ 13,/* 185 */ 13,/* 186 */ 13,/* 187 */ 13,/* 188 */ 13,/* 189 */ 13,
+            /* 190 */ 13,/* 191 */ 13,/* 192 */ 13,/* 193 */ 13,/* 194 */ 13,/* 195 */ 13,/* 196 */ 13,/* 197 */ 13,/* 198 */ 13,/* 199 */ 13,
+            /* 200 */ 13,/* 201 */ 13,/* 202 */ 13,/* 203 */ 13,/* 204 */ 13,/* 205 */ 13,/* 206 */ 13,/* 207 */ 13,/* 208 */ 13,/* 209 */ 13,
+            /* 210 */ 13,/* 211 */ 13,/* 212 */ 13,/* 213 */ 13,/* 214 */ 13,/* 215 */ 13,/* 216 */ 13,/* 217 */ 13,/* 218 */ 13,/* 219 */ 13,
+            /* 220 */ 14,/* 221 */ 14,/* 222 */ 14,/* 223 */ 14,/* 224 */ 14,/* 225 */ 14,/* 226 */ 14,/* 227 */ 14,/* 228 */ 14,/* 229 */ 14,
+            /* 230 */ 14,/* 231 */ 14,/* 232 */ 14,/* 233 */ 14,/* 234 */ 14,/* 235 */ 14,/* 236 */ 14,/* 237 */ 14,/* 238 */ 14,/* 239 */ 14,
+            /* 240 */ 14,/* 241 */ 14,/* 242 */ 14,/* 243 */ 14,/* 244 */ 14,/* 245 */ 14,/* 246 */ 14,/* 247 */ 14,/* 248 */ 14,/* 249 */ 14,
+            /* 250 */ 15,/* 251 */ 15,/* 252 */ 15,/* 253 */ 15,/* 254 */ 15,/* 255 */ 15,/* 256 */ 15,/* 257 */ 15,/* 258 */ 15,/* 259 */ 15,
+            /* 260 */ 15,/* 261 */ 15,/* 262 */ 15,/* 263 */ 15,/* 264 */ 15,/* 265 */ 15,/* 266 */ 15,/* 267 */ 15,/* 268 */ 15,/* 269 */ 15,
+            /* 270 */ 15,/* 271 */ 15,/* 272 */ 15,/* 273 */ 15,/* 274 */ 15,/* 275 */ 15,/* 276 */ 15,/* 277 */ 15,/* 278 */ 15,/* 279 */ 15,
+            /* 280 */ 16,/* 281 */ 16,/* 282 */ 16,/* 283 */ 16,/* 284 */ 16,/* 285 */ 16,/* 286 */ 16,/* 287 */ 16,/* 288 */ 16,/* 289 */ 16,
+            /* 290 */ 16,/* 291 */ 16,/* 292 */ 16,/* 293 */ 16,/* 294 */ 16,/* 295 */ 16,/* 296 */ 16,/* 297 */ 16,/* 298 */ 16,/* 299 */ 16,
+            /* 300 */ 16,/* 301 */ 16,/* 302 */ 16,/* 303 */ 16,/* 304 */ 16,/* 305 */ 16,/* 306 */ 16,/* 307 */ 16,/* 308 */ 16,/* 309 */ 16,
+            /* 310 */ 17,/* 311 */ 17,/* 312 */ 17,/* 313 */ 17,/* 314 */ 17,/* 315 */ 17,/* 316 */ 17,/* 317 */ 17,/* 318 */ 17,/* 319 */ 17,
+            /* 320 */ 17,/* 321 */ 17,/* 322 */ 17,/* 323 */ 17,/* 324 */ 17,/* 325 */ 17,/* 326 */ 17,/* 327 */ 17,/* 328 */ 17,/* 329 */ 17,
+            /* 330 */ 17,/* 331 */ 17,/* 332 */ 17,/* 333 */ 17,/* 334 */ 17,/* 335 */ 17,/* 336 */ 17,/* 337 */ 17,/* 338 */ 17,/* 339 */ 17,
+            /* 340 */ 17,/* 341 */ 17,/* 342 */ 17,/* 343 */ 17,/* 344 */ 17,/* 345 */ 17,/* 346 */ 17,/* 347 */ 17,/* 348 */ 17,/* 349 */ 17,
+            /* 350 */ 17,/* 351 */ 17,/* 352 */ 17,/* 353 */ 17,/* 354 */ 17,/* 355 */ 17,/* 356 */ 17,/* 357 */ 17,/* 358 */ 17,/* 359 */ 17,
+            /* 360 */ 17,/* 361 */ 17,/* 362 */ 17,/* 363 */ 17,/* 364 */ 17,/* 365 */ 17,/* 366 */ 17,/* 367 */ 17,/* 368 */ 17,/* 369 */ 17,
+            /* 370 */ 17,/* 371 */ 17,/* 372 */ 17,/* 373 */ 17,/* 374 */ 17,/* 375 */ 17,/* 376 */ 17,/* 377 */ 17,/* 378 */ 17,/* 379 */ 17,
+            /* 380 */ 17,/* 381 */ 17,/* 382 */ 17,/* 383 */ 17,/* 384 */ 17,/* 385 */ 17,/* 386 */ 17,/* 387 */ 17,/* 388 */ 17,/* 389 */ 17,
+            /* 390 */ 17,/* 391 */ 17,/* 392 */ 17,/* 393 */ 17,/* 394 */ 17,/* 395 */ 17,/* 396 */ 17,/* 397 */ 17,/* 398 */ 17,/* 399 */ 17,
+            /* 400 */ 17,/* 401 */ 17,/* 402 */ 17,/* 403 */ 17,/* 404 */ 17,/* 405 */ 17,/* 406 */ 17,/* 407 */ 17,/* 408 */ 17,/* 409 */ 17,
+            /* 410 */ 17,/* 411 */ 17,/* 412 */ 17,/* 413 */ 17,/* 414 */ 17,/* 415 */ 17,/* 416 */ 17,/* 417 */ 17,/* 418 */ 17,/* 419 */ 17,
+            /* 420 */ 17,/* 421 */ 17,/* 422 */ 17,/* 423 */ 17,/* 424 */ 17,/* 425 */ 17,/* 426 */ 17,/* 427 */ 17,/* 428 */ 17,/* 429 */ 17,
+            /* 430 */ 17,/* 431 */ 17,/* 432 */ 17,/* 433 */ 17,/* 434 */ 17,/* 435 */ 17,/* 436 */ 17,/* 437 */ 17,/* 438 */ 17,/* 439 */ 17,
+            /* 440 */ 17,/* 441 */ 17,/* 442 */ 17,/* 443 */ 17,/* 444 */ 17,/* 445 */ 17,/* 446 */ 17,/* 447 */ 17,/* 448 */ 17,/* 449 */ 17,
+            /* 450 */ 18,/* 451 */ 18,/* 452 */ 18,/* 453 */ 18,/* 454 */ 18,/* 455 */ 18,/* 456 */ 18,/* 457 */ 18,/* 458 */ 18,/* 459 */ 18,
+            /* 460 */ 18,/* 461 */ 18,/* 462 */ 18,/* 463 */ 18,/* 464 */ 18,/* 465 */ 18,/* 466 */ 18,/* 467 */ 18,/* 468 */ 18,/* 469 */ 18,
+            /* 470 */ 18,/* 471 */ 18,/* 472 */ 18,/* 473 */ 18,/* 474 */ 18,/* 475 */ 18,/* 476 */ 18,/* 477 */ 18,/* 478 */ 18,/* 479 */ 18,
+            /* 480 */ 18,/* 481 */ 18,/* 482 */ 18,/* 483 */ 18,/* 484 */ 18,/* 485 */ 18,/* 486 */ 18,/* 487 */ 18,/* 488 */ 18,/* 489 */ 18,
+            /* 490 */ 18,/* 491 */ 18,/* 492 */ 18,/* 493 */ 18,/* 494 */ 18,/* 495 */ 18,/* 496 */ 18,/* 497 */ 18,/* 498 */ 18,/* 499 */ 18,
+            /* 500 */ 18,/* 501 */ 18,/* 502 */ 18,/* 503 */ 18,/* 504 */ 18,/* 505 */ 18,/* 506 */ 18,/* 507 */ 18,/* 508 */ 18,/* 509 */ 18,
+            /* 510 */ 18,/* 511 */ 18,/* 512 */ 18,/* 513 */ 18,/* 514 */ 18,/* 515 */ 18,/* 516 */ 18,/* 517 */ 18,/* 518 */ 18,/* 519 */ 18,
+            /* 520 */ 18,/* 521 */ 18,/* 522 */ 18,/* 523 */ 18,/* 524 */ 18,/* 525 */ 18,/* 526 */ 18,/* 527 */ 18,/* 528 */ 18,/* 529 */ 18,
+            /* 530 */ 18,/* 531 */ 18,/* 532 */ 18,/* 533 */ 18,/* 534 */ 18,/* 535 */ 18,/* 536 */ 18,/* 537 */ 18,/* 538 */ 18,/* 539 */ 18,
+            /* 540 */ 18,/* 541 */ 18,/* 542 */ 18,/* 543 */ 18,/* 544 */ 18,/* 545 */ 18,/* 546 */ 18,/* 547 */ 18,/* 548 */ 18,/* 549 */ 18,
+            /* 550 */ 18,/* 551 */ 18,/* 552 */ 18,/* 553 */ 18,/* 554 */ 18,/* 555 */ 18,/* 556 */ 18,/* 557 */ 18,/* 558 */ 18,/* 559 */ 18,
+            /* 560 */ 18,/* 561 */ 18,/* 562 */ 18,/* 563 */ 18,/* 564 */ 18,/* 565 */ 18,/* 566 */ 18,/* 567 */ 18,/* 568 */ 18,/* 569 */ 18,
+            /* 570 */ 18,/* 571 */ 18,/* 572 */ 18,/* 573 */ 18,/* 574 */ 18,/* 575 */ 18,/* 576 */ 18,/* 577 */ 18,/* 578 */ 18,/* 579 */ 18,
+            /* 580 */ 18,/* 581 */ 18,/* 582 */ 18,/* 583 */ 18,/* 584 */ 18,/* 585 */ 18,/* 586 */ 18,/* 587 */ 18,
+            /* 588 */ 19,/* 589 */ 19,/* 590 */ 19,/* 591 */ 19,/* 592 */ 19,/* 593 */ 19,/* 594 */ 19,/* 595 */ 19,/* 596 */ 19,/* 597 */ 19,
+            /* 598 */ 19,/* 599 */ 19,/* 600 */ 19,/* 601 */ 19,/* 602 */ 19,/* 603 */ 19,/* 604 */ 19,/* 605 */ 19,/* 606 */ 19,/* 607 */ 19,
+            /* 608 */ 19,/* 609 */ 19,/* 610 */ 19,/* 611 */ 19,/* 612 */ 19,/* 613 */ 19,/* 614 */ 19,/* 615 */ 19,/* 616 */ 19,/* 617 */ 19,
+            /* 618 */ 19,/* 619 */ 19,/* 620 */ 19,/* 621 */ 19,/* 622 */ 19,/* 623 */ 19,/* 624 */ 19,/* 625 */ 19,/* 626 */ 19,/* 627 */ 19,
+            /* 628 */ 19,/* 629 */ 19,/* 630 */ 19,/* 631 */ 19,/* 632 */ 19,/* 633 */ 19,/* 634 */ 19,/* 635 */ 19,/* 636 */ 19,/* 637 */ 19,
+            /* 638 */ 19,/* 639 */ 19,/* 640 */ 19,/* 641 */ 19,/* 642 */ 19,/* 643 */ 19,/* 644 */ 19,/* 645 */ 19,/* 646 */ 19,/* 647 */ 19,
+            /* 648 */ 19,/* 649 */ 19)
+
+        fun getFrequencyIndex(frequencyMhz: Long): Int {
+            if (frequencyMhz < 50) {
+                return 0
+            } else {
+                with ((frequencyMhz - 50).toInt()) {
+                    return if (this < freqToIndex.size) {
+                        freqToIndex[this]
+                    } else {
+                        20
+                    }
+                }
+            }
+        }
 
         val initArray = intArrayOf(
             0x83, 0x32, 0x75,            /* 05 to 07 */

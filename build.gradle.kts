@@ -4,8 +4,8 @@ plugins {
     id("maven-publish")
 }
 
-group = "com.virginiaprivacy"
-version = "0.3.2"
+group = "com.github.virginiaprivacycoalition"
+version = "0.3.5"
 
 repositories {
     mavenCentral()
@@ -25,9 +25,9 @@ tasks.getByName<Test>("test") {
 publishing {
     publications {
         create<MavenPublication>("release") {
-            group = "com.virginiaprivacy.adsbtrack.drivers"
+            group = "com.github.virginiaprivacycoalition"
             artifactId = "sdr"
-            version = "0.3.2"
+            version = "0.3.5"
             from(components["java"])
         }
     }

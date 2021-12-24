@@ -329,12 +329,6 @@ open class RTLDevice(private val usbDevice: UsbIFace,
         devLost = 0
         setI2cRepeater(1)
 
-        // For now and for easier testing, just assume the device is an R820T
-        demodWriteReg(1, 0xb1, 0x1a, 1)
-        demodWriteReg(0, 0x08, 0x4d, 1)
-        setIFFreq(R82XX_IF_FREQ)
-        demodWriteReg(1, 0x15, 0x01, 1)
-
         tunableDevice.init(this)
         setI2cRepeater(0)
 
@@ -513,10 +507,15 @@ open class RTLDevice(private val usbDevice: UsbIFace,
     fun setIFFreq(freq: Long) {
         val ifFreq = ((freq * TWO_22_POW) / tunableDevice.getXtalFreq() * (-1)).toInt()
 
+        // write byte 2
         var i = (ifFreq shr 16) and 0x3f
         demodWriteReg(1, 0x19, i, 1)
+
+        // write byte one
         i = (ifFreq shr 8) and 0xff
         demodWriteReg(1, 0x1a, i, 1)
+
+        // write byte 2
         i = ifFreq and 0xff
         demodWriteReg(1, 0x1b, i, 1)
     }
