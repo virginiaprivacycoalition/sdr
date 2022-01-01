@@ -3,17 +3,16 @@ package com.virginiaprivacy.drivers.sdr.r2xx
 import com.virginiaprivacy.drivers.sdr.*
 import com.virginiaprivacy.drivers.sdr.RTLDevice.Companion.R82XX_IF_FREQ
 import com.virginiaprivacy.drivers.sdr.exceptions.PllNotLockedException
-import com.virginiaprivacy.drivers.sdr.r2xx.R82XX.Reg.*
 import com.virginiaprivacy.drivers.sdr.r2xx.R82xxChip.CHIP_R828D
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import java.io.IOException
-import java.lang.RuntimeException
+import java.util.concurrent.locks.ReentrantLock
 import kotlin.experimental.and
 
 @ExperimentalCoroutinesApi
 @ExperimentalUnsignedTypes
 class R82XX  constructor(
-override val dev: RTLDevice) : TunableDevice, I2C {
+override val dev: RTLDevice) : TunableDevice, I2C, TunableGain {
 
 
     override val config = R82xxConfig(Tuner.RTLSDR_TUNER_R820T)
@@ -24,6 +23,7 @@ override val dev: RTLDevice) : TunableDevice, I2C {
     private var input = 0
     private var hasLock: Boolean = false
     override var initDone: Boolean = false
+    private val lock = ReentrantLock()
     private var _currentFrequencyRange: R82xxFrequencyRange? = null
     private var currentFrequencyRange: R82xxFrequencyRange?
         get() = _currentFrequencyRange
@@ -435,7 +435,14 @@ override val dev: RTLDevice) : TunableDevice, I2C {
          * LNA gain mode switch
          * 0: auto 1: manual
          */
-        LNA_GAIN(0x05, 0X1F),
+        LNA_GAIN_POWER(0x05, 0x1f),
+
+        /**
+         *
+         */
+        LNA_GAIN(0x05, 0x0f),
+
+        MIXER_GAIN(0x07, 0x1F),
 
         /**
          * Open drain
@@ -490,7 +497,9 @@ override val dev: RTLDevice) : TunableDevice, I2C {
          */
         VCO_CURRENT(0x12, 0xE0),
 
-        TF_BAND(0x01b, 0x00)
+        TF_BAND(0x01b, 0x00),
+
+        VGA_GAIN(0x0c, 0x9f)
 
 
     }
@@ -666,4 +675,33 @@ override val dev: RTLDevice) : TunableDevice, I2C {
             0x9, 0x5, 0xd, 0x3, 0xb, 0x7, 0xf
         )
     }
+
+
+    private var mLnaGain: LNA_GAIN = LNA_GAIN.AUTOMATIC
+    private var mVgaGain: VGA_GAIN = VGA_GAIN._0
+    private var mMixerGain: MIXER_GAIN = MIXER_GAIN.AUTOMATIC
+    override var lnaGain: LNA_GAIN
+        get() = mLnaGain
+        set(value) {
+            if (mLnaGain != value) {
+                mLnaGain = value
+                R82XXRegister.LNA_GAIN.write(mLnaGain.value)
+            }
+        }
+    override var vgaGain: VGA_GAIN
+        get() = mVgaGain
+        set(value) {
+            if (mVgaGain != value) {
+                mVgaGain = value
+                R82XXRegister.VGA_GAIN.write(mVgaGain.value)
+            }
+        }
+    override var mixerGain: MIXER_GAIN
+        get() = mMixerGain
+        set(value) {
+            if (mMixerGain != value) {
+                mMixerGain = value
+                R82XXRegister.MIXER_GAIN.write(mMixerGain.value)
+            }
+        }
 }

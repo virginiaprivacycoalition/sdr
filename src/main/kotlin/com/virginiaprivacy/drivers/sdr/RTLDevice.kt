@@ -3,6 +3,7 @@ package com.virginiaprivacy.drivers.sdr
 import com.virginiaprivacy.drivers.sdr.data.Sample
 import com.virginiaprivacy.drivers.sdr.data.Status
 import com.virginiaprivacy.drivers.sdr.plugins.Plugin
+import com.virginiaprivacy.drivers.sdr.r2xx.R82XX
 import com.virginiaprivacy.drivers.sdr.usb.UsbIFace
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -35,8 +36,18 @@ open class RTLDevice(private val usbDevice: UsbIFace,
     lateinit var tunableDevice: TunableDevice
 
     private val scope = CoroutineScope(
-        Executors.newSingleThreadExecutor().asCoroutineDispatcher()
+        Executors.newFixedThreadPool(1).asCoroutineDispatcher()
     )
+
+    var agcMode: Boolean
+        get() {
+            val result = demodReadReg(0, 0x19, 1)
+            return result == 0x25
+        }
+        set(value) {
+            val i = if (value) 0x25 else 0x05
+            demodWriteReg(0, 0x19, i, 1)
+        }
 
     private fun ioStatus() = Status.getIOStatus().value
 
@@ -82,6 +93,7 @@ open class RTLDevice(private val usbDevice: UsbIFace,
     }
 
     /**
+     *
      * Writes an array to the device using a control transfer.
      * @param block - the page/block of the register that is being written to.
      * @param address - the address to write directly to.
@@ -208,6 +220,36 @@ open class RTLDevice(private val usbDevice: UsbIFace,
             tunableDevice.setGain(true, gain)
         } else {
             tunableDevice.setGain(false)
+        }
+        setI2cRepeater(0)
+    }
+
+    fun setLNAGain(gain: LNA_GAIN) {
+        setI2cRepeater(1)
+        if (tunableDevice is TunableGain) {
+            (tunableDevice as TunableGain).run {
+                lnaGain = gain
+            }
+        }
+        setI2cRepeater(0)
+    }
+
+    fun setVGAGain(gain: VGA_GAIN) {
+        setI2cRepeater(1)
+        if (tunableDevice is TunableGain) {
+            (tunableDevice as TunableGain).run {
+                vgaGain = gain
+            }
+        }
+        setI2cRepeater(0)
+    }
+
+    fun setMixerGain(gain: MIXER_GAIN) {
+        setI2cRepeater(1)
+        if (tunableDevice is TunableGain) {
+            (tunableDevice as TunableGain).run {
+                mixerGain = gain
+            }
         }
         setI2cRepeater(0)
     }
@@ -392,8 +434,6 @@ open class RTLDevice(private val usbDevice: UsbIFace,
     }
 
     private fun readAsync() {
-        Status.startTime = System.currentTimeMillis()
-        Status.bytesRead = 0
         Status.setIOStatus(IOStatus.ACTIVE)
         scope.launch {
             allocateBuffersAsync()
@@ -412,7 +452,6 @@ open class RTLDevice(private val usbDevice: UsbIFace,
                             buf.get(bytes)
                             rawFlow.emit(bytes)
                             buf.clear()
-                            Status.bytesRead += (bytesRead)
                         }
                     }
                 } else {
@@ -474,14 +513,13 @@ open class RTLDevice(private val usbDevice: UsbIFace,
 
     fun setSampleRate(rate: Int): Int {
         var r = 0
-        var rsampRatio = 0
         var realRsampRatio = 0
         var realRate = 0.0
-        if (rate !in 225001..3200000 || rate in 300001..900000) {
+        if ((rate !in (22500..3200000)) || (rate in (300001..900000))) {
             val msg = "Invalid sample rate: ${rate}Hz"
             throw IllegalArgumentException(msg)
         }
-        rsampRatio = (tunableDevice.rtlXtal() * TWO_22_POW / rate).roundToInt()
+        var rsampRatio: Int = (tunableDevice.rtlXtal() * TWO_22_POW / rate).roundToInt()
         rsampRatio = rsampRatio and 0x0ffffffc
         realRsampRatio = rsampRatio or ((rsampRatio and 0x08000000) shl 1)
         realRate = (tunableDevice.rtlXtal() * TWO_22_POW / realRsampRatio)
@@ -497,11 +535,6 @@ open class RTLDevice(private val usbDevice: UsbIFace,
         tunableDevice.rate = realRate.roundToInt()
 
         return r
-    }
-
-    fun setAGCMode(enabled: Boolean) {
-        val i = if (enabled) 0x25 else 0x05
-        demodWriteReg(0, 0x19, i, 1)
     }
 
     fun setIFFreq(freq: Long) {
