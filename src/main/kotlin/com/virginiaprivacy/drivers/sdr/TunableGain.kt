@@ -5,17 +5,26 @@ interface TunableGain {
     var lnaGain: LNA_GAIN
     var vgaGain: VGA_GAIN
     var mixerGain: MIXER_GAIN
+    var tunerAutoGainEnabled: Boolean
+
+    /**
+     * The gain reported by the device.
+     */
+    val actualGain: Int
+
+    fun setGain(manualGain: Boolean, gain: Int? = null)
+
 }
 
 
 enum class LNA_GAIN(val value: Int) {
 
     AUTOMATIC(0x00),
-    _0( 0x10),
-    _9( 0x11),
-    _21( 0x12),
-    _61( 0x13),
-    _99( 0x14),
+    _0(0x10),
+    _9(0x11),
+    _21(0x12),
+    _61(0x13),
+    _99(0x14),
     _112(0x15),
     _143(0x16),
     _165(0x17),

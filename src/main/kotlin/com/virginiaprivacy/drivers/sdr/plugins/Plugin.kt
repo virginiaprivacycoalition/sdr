@@ -1,34 +1,23 @@
-@file:OptIn(ExperimentalStdlibApi::class)
-
 package com.virginiaprivacy.drivers.sdr.plugins
 
-import com.virginiaprivacy.drivers.sdr.RTLDevice
-import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.flow.Flow
 import java.util.concurrent.Executors
 
 
-fun interface Plugin {
-
-
-    fun processSignalBuffer(buf: ByteArray)
+fun interface Plugin<in T, out R> : (Flow<T>) -> Flow<R> {
 
 }
 
-val Plugin.device: RTLDevice
-    get() = TODO("Not yet implemented")
 
-val Plugin.scope: CoroutineScope
-    get() = CoroutineScope(Executors.newSingleThreadExecutor().asCoroutineDispatcher())
+val Plugin<*, *>.scope: CoroutineScope
+    get() = CoroutineScope(Executors.newFixedThreadPool(1).asCoroutineDispatcher())
 
-fun Plugin.run() {
-    println("${this::class.qualifiedName} setup complete. . . Now running. test version")
-    scope.launch {
-        device.rawFlow
-            .collect {
-                processSignalBuffer(buf = it)
-            }
-    }
-}
+
+
+
+
+
 
 

@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "com.github.virginiaprivacycoalition"
-version = "0.3.7"
+version = "0.6.1"
 
 repositories {
     mavenCentral()
@@ -14,12 +14,15 @@ repositories {
 dependencies {
     api("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.0-native-mt")
     implementation("org.jetbrains.kotlin:kotlin-stdlib:1.6.10")
-    testImplementation("org.junit.jupiter:junit-jupiter-api:5.7.2")
-    testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.7.2")
+    testImplementation("io.kotest:kotest-runner-junit5:5.0.3")
+    testImplementation("io.kotest:kotest-assertions-core:5.0.3")
 }
 
 tasks.getByName<Test>("test") {
     useJUnitPlatform()
+}
+tasks.kotlinSourcesJar {
+    archiveClassifier.set("sources")
 }
 
 publishing {
@@ -27,8 +30,9 @@ publishing {
         create<MavenPublication>("release") {
             group = "com.github.virginiaprivacycoalition"
             artifactId = "sdr"
-            version = "0.3.7"
+            version = "0.6.1"
             from(components["java"])
+            artifact(tasks.kotlinSourcesJar)
         }
     }
 }

@@ -1,21 +1,18 @@
 package com.virginiaprivacy.drivers.sdr.data
 
-import com.virginiaprivacy.drivers.sdr.plugins.Plugin
-import kotlin.experimental.and
+data class SampleBuffer(val buffer: List<Byte>, val centerFrequency: Long, val sampleRate: Int) {
 
-data class Sample(val iByte: Byte, val qByte: Byte, val index: Int) {
+    private val maxOneWayRange = sampleRate / 2
 
-    val i: Int
-    get() = iByte.toInt().and(0xFF)
+    val data: Iterable<*> = buffer.toList()
 
-    val q: Int
-    get() = qByte.toInt().and(0xFF)
+    val frequencyRange = (centerFrequency - maxOneWayRange)..(centerFrequency + maxOneWayRange)
 
+    constructor(buffer: ByteArray, centerFrequency: Long, sampleRate: Int) : this(
+        buffer.asList(),
+        centerFrequency,
+        sampleRate
+    )
 }
 
 
-val convertBufToSamplesPlugin = Plugin {
-    it.asList().windowed(2, 2).map {
-
-    }
-}

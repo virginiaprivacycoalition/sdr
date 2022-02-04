@@ -1,10 +1,6 @@
 package com.virginiaprivacy.drivers.sdr
 
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-
-@ExperimentalCoroutinesApi
-@ExperimentalUnsignedTypes
-interface TunableDevice {
+interface TunableDevice : TunableGain {
 
     val config: RTLConfig
     var ppmCorrection: Int
@@ -25,13 +21,11 @@ interface TunableDevice {
 
     fun getTunedFrequency(): Long
 
-    fun setGain(manualGain: Boolean, gain: Int? = null)
-
     fun writeReg(reg: Int, value: Int)
 
     fun read(reg: Int, len: Int): ByteArray
 
     fun writeRegMask(reg: Int, value: Int, bitMask: Int)
 
-    fun init(dev: RTLDevice)
+    fun init()
 }

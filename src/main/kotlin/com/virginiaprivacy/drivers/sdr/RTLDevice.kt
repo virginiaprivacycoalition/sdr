@@ -1,29 +1,31 @@
 package com.virginiaprivacy.drivers.sdr
 
-import com.virginiaprivacy.drivers.sdr.data.Sample
-import com.virginiaprivacy.drivers.sdr.data.Status
 import com.virginiaprivacy.drivers.sdr.plugins.Plugin
-import com.virginiaprivacy.drivers.sdr.r2xx.R82XX
+import com.virginiaprivacy.drivers.sdr.plugins.scope
+import com.virginiaprivacy.drivers.sdr.usb.ResultStatus
 import com.virginiaprivacy.drivers.sdr.usb.UsbIFace
-import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.sync.Mutex
 import java.io.Closeable
 import java.io.IOException
 import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.util.concurrent.Executors
+import kotlin.experimental.and
 import kotlin.experimental.or
 import kotlin.math.pow
 import kotlin.math.roundToInt
 
-@ExperimentalUnsignedTypes
-@ExperimentalCoroutinesApi
-open class RTLDevice(private val usbDevice: UsbIFace,
-                                          private val bufferSize: Int = BUF_BYTES,
-                                          private val numBuffers: Int = DEFAULT_ASYNC_BUF_COUNT) : Closeable {
+abstract class RTLDevice(
+    private val usbDevice: UsbIFace,
+    private val bufferSize: Int = BUF_BYTES,
+    private val numBuffers: Int = DEFAULT_ASYNC_BUF_COUNT
+) : Closeable, TunableDevice {
 
-    var devLost: Int = 0
+    private var devLost: Int = 0
 
     val product by usbDevice::productName
 
@@ -31,42 +33,38 @@ open class RTLDevice(private val usbDevice: UsbIFace,
 
     val manufacturer by usbDevice::manufacturerName
 
+    val bufferSampleSize = bufferSize / 2
+
     val tunerChip: Tuner by lazy { Tuner.tunerType(this) }
 
-    lateinit var tunableDevice: TunableDevice
+    val tunerGain by lazy { actualGain }
 
+    private val context = Executors.newFixedThreadPool(1).asCoroutineDispatcher()
     private val scope = CoroutineScope(
-        Executors.newFixedThreadPool(1).asCoroutineDispatcher()
+        context
     )
+
+    val tunerAutoGain: Boolean by ::tunerAutoGainEnabled
 
     var agcMode: Boolean
         get() {
-            val result = demodReadReg(0, 0x19, 1)
+            val result = demodulatorReadReg(0, 0x19, 1)
             return result == 0x25
         }
         set(value) {
             val i = if (value) 0x25 else 0x05
-            demodWriteReg(0, 0x19, i, 1)
+            demodulatorWriteReg(0, 0x19, i, 1)
         }
-
-    private fun ioStatus() = Status.getIOStatus().value
 
     val rawFlow = MutableSharedFlow<ByteArray>(extraBufferCapacity = numBuffers)
 
-    val sampleFlow = rawFlow.map { bytes ->
-        bytes.asList().windowed(2, 2).withIndex().forEach {
-            return@map Sample(it.value[0], it.value[1], it.index)
-        }
-    }
 
-    private val buffers = ArrayList<ByteBuffer>(numBuffers)
+    private val bufferMutex = Mutex()
 
-    fun writeRegMask(reg: Int, value: Int, bitMask: Int) {
-        tunableDevice.writeRegMask(reg, value, bitMask)
-    }
+    private val buffers = mutableListOf<ByteBuffer>()
 
     fun writeTunerReg(reg: Int, value: Int) {
-        tunableDevice.writeReg(reg, value)
+        writeReg(reg, value)
     }
 
     private fun readByte(block: Int, address: UShort): Byte {
@@ -79,16 +77,17 @@ open class RTLDevice(private val usbDevice: UsbIFace,
 
     private fun read(block: Int, length: Int, address: Int): ByteArray {
         val index = block shl 8
-        val bytes = ByteArray(length)
+        val buf = ByteBuffer.allocateDirect(length)
         usbDevice.controlTransfer(
             CTRL_IN,
-            0,
-            address,
-            index,
-            bytes,
+            address.toShort(),
+            index.toShort(),
+            buf,
             length,
             CTRL_TIMEOUT
         )
+        val bytes = ByteArray(length)
+        buf.get(bytes)
         return bytes
     }
 
@@ -101,192 +100,188 @@ open class RTLDevice(private val usbDevice: UsbIFace,
      * @param length - the amount of bytes to be written.
      * @return Int - The number of bytes that was written.
      */
-    private fun writeArray(block: Int, address: UShort, array: ByteArray, length: Int): Int {
+    private fun writeArray(block: Int, address: Short, array: ByteArray, length: Int) {
         val index = (block shl 8) or 0x10
-        return usbDevice.controlTransfer(
+        val buffer = ByteBuffer.allocateDirect(length)
+        buffer.put(array)
+
+        usbDevice.controlTransfer(
             CTRL_OUT,
-            0,
-            address.toInt(),
-            index,
-            array,
+            address,
+            index.toShort(),
+            buffer,
             length,
             CTRL_TIMEOUT
         )
     }
 
     private fun readReg(block: Int, address: Int, length: Int): Int {
-        val data = UByteArray(length).toByteArray()
+        val data = ByteBuffer.allocateDirect(2)
         val index = block shl 8
         val result =
             usbDevice.controlTransfer(
                 CTRL_IN,
-                0,
-                address,
-                index,
+                address.toShort(),
+                index.toShort(),
                 data,
                 length,
                 CTRL_TIMEOUT
             )
-        checkError(result)
-        return when (length) {
-            0 -> 0
-            1 -> data[0].toInt()
-            else -> (data[1].toInt() shl 8 or data[0].toInt())
+        return when (result.status) {
+            is ResultStatus.Completed ->
+                if (length == 1) (data.apply { order(ByteOrder.LITTLE_ENDIAN) }).get()
+                    .toInt() and 0xff else data.short.toInt() and 0xffff
+            else -> error(result)
         }
     }
 
-    fun writeReg(block: Int, address: Int, value: Int, length: Int): Int {
-        val data = UByteArray(length)
+    private fun writeReg(block: Int, address: Int, value: Int, length: Int) {
+        val buffer = ByteBuffer.allocateDirect(length)
 
-        val index = (block shl 8) or 0x10
-        if (length == 1) {
-            data[0] = (value and 0xff).toUByte()
-        } else {
-            data[0] = ((value.toUInt() shr 8).toUByte())
-            data[1] = (value.toUInt() and 255u).toUByte()
+        val index = block.rotateLeft(8).toShort() or 16
+        when (length) {
+            1 -> buffer.put((value and 0xff).toByte())
+            2 -> buffer.putShort((value and 0xFFFF).toShort())
+            else -> throw IllegalArgumentException("Max size of data is 2 bytes")
         }
 
         val result = usbDevice.controlTransfer(
             CTRL_OUT,
-            0,
-            address,
+            address.toShort(),
             index,
-            data.asByteArray(),
+            buffer,
             length,
             CTRL_TIMEOUT
         )
-        checkError(result)
-        return result
+
+        when (result.status) {
+            is ResultStatus.Error -> println("Transfer failed: $result")
+            else -> {
+            }
+        }
     }
 
-    private fun demodReadReg(page: Int, address: Int, length: Int): Int {
-        val data = UByteArray(length)
-        val realAddress = (address shl 8) or 32
-
+    private fun demodulatorReadReg(page: Int, address: Int, length: Int): Int {
+        val buffer = ByteBuffer.allocateDirect(length)
+        val realAddress = (address shl 8) or 0x20
         val result = usbDevice.controlTransfer(
             CTRL_IN,
-            0,
-            realAddress,
-            page,
-            data.toByteArray(),
+            realAddress.toShort(),
+            page.toShort(),
+            buffer,
             length,
             CTRL_TIMEOUT
         )
-        checkError(result)
+        if (result.status !is ResultStatus.Success) {
+            error(result)
+        }
+        buffer.order(ByteOrder.LITTLE_ENDIAN)
         return when (length) {
-            0 -> 0
-            1 -> data[0].toInt()
-            else -> (data[1].toInt() shl 8 or data[0].toInt())
+            1 -> (buffer.get() and 0xff).toInt()
+            2 -> buffer.short.and(0xffff.toShort()).toInt()
+            else -> throw IllegalArgumentException("Max size of data is 2 bytes")
         }
     }
 
     /**
      *
      */
-    fun demodWriteReg(page: Int, address: Int, value: Int, length: Int): Int {
-        val data = UByteArray(length)
+    fun demodulatorWriteReg(page: Int, address: Int, value: Int, length: Int) {
+        val buffer = ByteBuffer.allocateDirect(length)
 
         val index = 16 or page
 
-        val realAddress = (address shl 8) or 32
+        val realAddress = address shl 8 or 32
 
-        if (length == 1) {
-            data[0] = (value and 0xff).toUByte()
-        } else {
-            data[0] = (value shr 8).toUByte()
-            data[1] = (value and 0xff).toUByte()
+        when (length) {
+            1 -> buffer.put((value and 0xff).toByte())
+            2 -> buffer.putShort((value and 0xFFFF).toShort())
+            else -> throw IllegalArgumentException("Max size of data is 2 bytes")
         }
+
         val result = usbDevice.controlTransfer(
             CTRL_OUT,
-            0,
-            realAddress,
-            index,
-            data.toByteArray(),
+            realAddress.toShort(),
+            index.toShort(),
+            buffer,
             length,
             CTRL_TIMEOUT
         )
-        checkError(result)
-        demodReadReg(0x0a, 0x01, 1)
-        return result
+        demodulatorReadReg(0x0a, 0x01, 1)
+        when (result.status) {
+            is ResultStatus.Error -> {
+                error(result)
+            }
+            else -> return
+        }
+    }
+
+    fun automaticGainControl(enabled: Boolean) {
+        setI2cRepeater(1)
+        tunerAutoGainEnabled = enabled
+        setI2cRepeater(0)
     }
 
     /**
      * Sets the tuners gain. Use setTunerGain() or setTunerGain(null) to set the tuner to
      * automatic gain mode.
      */
+    @Deprecated("Use TunableGain.autoGainEnabled for now")
     fun setTunerGain(gain: Int? = null) {
         setI2cRepeater(1)
         if (gain != null) {
-            tunableDevice.setGain(true, gain)
+            setGain(true, gain)
         } else {
-            tunableDevice.setGain(false)
+            setGain(false)
         }
         setI2cRepeater(0)
     }
 
     fun setLNAGain(gain: LNA_GAIN) {
         setI2cRepeater(1)
-        if (tunableDevice is TunableGain) {
-            (tunableDevice as TunableGain).run {
-                lnaGain = gain
-            }
+        (this as TunableGain).run {
+            lnaGain = gain
         }
         setI2cRepeater(0)
     }
 
     fun setVGAGain(gain: VGA_GAIN) {
         setI2cRepeater(1)
-        if (tunableDevice is TunableGain) {
-            (tunableDevice as TunableGain).run {
-                vgaGain = gain
-            }
-        }
-        setI2cRepeater(0)
-    }
-
-    fun setMixerGain(gain: MIXER_GAIN) {
-        setI2cRepeater(1)
-        if (tunableDevice is TunableGain) {
-            (tunableDevice as TunableGain).run {
-                mixerGain = gain
-            }
+        (this as TunableGain).run {
+            vgaGain = gain
         }
         setI2cRepeater(0)
     }
 
     private fun setFir() {
-        val fir = UIntArray(20)
+        val fir = IntArray(20)
         for (i in 1..8) {
             val f = Companion.fir[i]
-            if (f.toInt() !in -128..127) {
+            if (f !in -128..127) {
                 return
             }
-            fir[i] = f.toUInt()
+            fir[i] = f
         }
         for (i in 0 until 8 step 2) {
-            val first = Companion.fir[8 + i].toUInt()
-            val second = Companion.fir[8 + i + 1].toUInt()
-            if (first.toInt() !in -2048..2047 || second.toInt() !in -2048..2047) {
+            val first = Companion.fir[8 + i]
+            val second = Companion.fir[8 + i + 1]
+            if (first !in -2048..2047 || second !in -2048..2047) {
                 throw IllegalArgumentException()
             }
             fir[8 + i * 3 / 2] = (first.shr(4))
             fir[8 + i * 3 / 2 + 1] =
-                ((first shl 4) or (((second shr 8) and 15u)))
+                ((first shl 4) or (((second shr 8) and 15)))
             fir[8 + i * 3 / 2 + 2] = second
         }
 
         fir.forEachIndexed { index, uInt ->
-            if (demodWriteReg(1, 0x1c + index, uInt.toInt(), 1) != 1) {
-                val msg = "FIR[$index]: $uInt did not return 0."
-                throw IllegalArgumentException(msg)
-            }
-
+            demodulatorWriteReg(1, 0x1c + index, uInt, 1)
         }
     }
 
     internal fun i2cReadReg(i2cAddress: Int, reg: Int): Int {
         val address = i2cAddress.toUShort()
-        writeArray(Blocks.IICB, address, byteArrayOf(reg.toByte()), 1)
+        writeArray(Blocks.IICB, address.toShort(), byteArrayOf(reg.toByte()), 1)
         return readArray(Blocks.IICB, i2cAddress, 1)[0].toInt()
     }
 
@@ -297,16 +292,16 @@ open class RTLDevice(private val usbDevice: UsbIFace,
      * @param len - the length of the bytes to be written.
      * @returns the number of bytes written to the i2c register.
      */
-    internal fun i2cWrite(i2cAddress: Int, buffer: ByteArray, len: Int): Int {
-        val address = i2cAddress.toUShort()
-        return writeArray(Blocks.IICB, address, buffer, len)
+    internal fun i2cWrite(i2cAddress: Int, buffer: ByteArray, len: Int) {
+        val address = i2cAddress.toShort()
+        writeArray(Blocks.IICB, address, buffer, len)
     }
 
     internal fun i2cRead(i2cAddress: Int, length: Int): ByteArray {
         return readArray(Blocks.IICB, i2cAddress, length)
     }
 
-    fun initBaseband() {
+    private fun initBaseband() {
 
         // initialize USB
         writeReg(Blocks.USBB, UsbReg.USB_SYSCTL, 0x09, 1)
@@ -318,60 +313,66 @@ open class RTLDevice(private val usbDevice: UsbIFace,
         writeReg(Blocks.SYSB, Reg.DEMOD_CTL, 0xe8, 1)
 
         // reset demod
-        demodWriteReg(1, 0x01, 0x14, 1)
-        demodWriteReg(1, 0x01, 0x10, 1)
+        demodulatorWriteReg(1, 0x01, 0x14, 1)
+        demodulatorWriteReg(1, 0x01, 0x10, 1)
 
         // disable spectrum inversion and adjacent channel rejection
-        demodWriteReg(1, 0x15, 0x00, 1)
-        demodWriteReg(1, 0x16, 0x0000, 2)
+        demodulatorWriteReg(1, 0x15, 0x00, 1)
+        demodulatorWriteReg(1, 0x16, 0x0000, 2)
 
         // clear DDC shift and IF registers
         for (i in 0..6)
-            demodWriteReg(1, 0x16 + i, 0x00, 1)
+            demodulatorWriteReg(1, 0x16 + i, 0x00, 1)
 
         setFir()
 
         // enable SDR mode, disable DAGC (bit 5)
-        demodWriteReg(0, 0x19, 0x05, 1)
+        demodulatorWriteReg(0, 0x19, 0x05, 1)
 
         // init FSM state-holding register
-        demodWriteReg(1, 0x93, 0xf0, 1)
-        demodWriteReg(1, 0x94, 0x0f, 1)
+        demodulatorWriteReg(1, 0x93, 0xf0, 1)
+        demodulatorWriteReg(1, 0x94, 0x0f, 1)
 
         // disable AGC(en_dagc, bit0)
-        demodWriteReg(1, 0x11, 0x00, 1)
+        demodulatorWriteReg(1, 0x11, 0x00, 1)
 
         //disable RF/IF AGC loop
-        demodWriteReg(1, 0x04, 0x00, 1)
+        demodulatorWriteReg(1, 0x04, 0x00, 1)
 
         // disable PID filter
-        demodWriteReg(0, 0x61, 0x60, 1)
+        demodulatorWriteReg(0, 0x61, 0x60, 1)
 
         // opt_adc_iq = 0
-        demodWriteReg(0, 0x06, 0x80, 1)
+        demodulatorWriteReg(0, 0x06, 0x80, 1)
 
         // enable 0-IF, DC cancellation, IQ estimation/compensation
-        demodWriteReg(1, 0xb1, 0x1b, 1)
+        demodulatorWriteReg(1, 0xb1, 0x1b, 1)
 
         // disable 4.096 MHz clock output on pin TP_CK0
-        demodWriteReg(0, 0x0d, 0x83, 1)
+        demodulatorWriteReg(0, 0x0d, 0x83, 1)
     }
 
     fun setup() {
-        if (writeReg(
-                Blocks.USBB,
-                UsbReg.USB_SYSCTL,
-                0x09,
-                1
-            ) < 0
-        ) {
-            error("Reset device")
+        repeat(2) {
+            runCatching {
+                writeReg(
+                    Blocks.USBB,
+                    UsbReg.USB_SYSCTL,
+                    0x09,
+                    1
+                )
+            }.fold(onFailure = {
+                println("Resetting device. . .")
+                usbDevice.resetDevice()
+            }, onSuccess = {
+                return@repeat
+            })
         }
         initBaseband()
         devLost = 0
         setI2cRepeater(1)
 
-        tunableDevice.init(this)
+        init()
         setI2cRepeater(0)
 
         println("Device successfully configured: $product by $manufacturer with serial no $serial")
@@ -385,10 +386,10 @@ open class RTLDevice(private val usbDevice: UsbIFace,
     }
 
     fun getTunerSampleRate(): Int {
-        val high = demodReadReg(0x1, 0x9F, 2)
-        val low = demodReadReg(0x1, 0xA1, 2)
+        val high = demodulatorReadReg(0x1, 0x9F, 2)
+        val low = demodulatorReadReg(0x1, 0xA1, 2)
         val ratio = Integer.rotateLeft(high, 16) or low
-        val sampleRate = tunableDevice.rtlXtal() * TWO_22_POW / ratio
+        val sampleRate = rtlXtal() * TWO_22_POW / ratio
         return sampleRate.roundToInt()
     }
 
@@ -399,78 +400,31 @@ open class RTLDevice(private val usbDevice: UsbIFace,
 
     fun stop() {
         println("Shutting down. . .")
-        Status.setIOStatus(IOStatus.EXIT)
-        runningPlugins.forEach {
-            it.scope.cancel("Shutting down")
-        }
-        resetBuffer()
+        usbDevice.resetDevice()
         scope.cancel()
         close()
     }
 
-    private val runningPlugins = mutableSetOf<Plugin>()
-
-    fun runPlugin(plugin: Plugin) {
-        readAsync()
-        plugin.run(this)
-        runningPlugins.add(plugin)
-    }
-
-    fun readSync() = flow {
-        Status.startTime = System.currentTimeMillis()
-        Status.bytesRead = 0
-        Status.setIOStatus(IOStatus.ACTIVE)
-        while (true) {
-            val bytes = ByteArray(bufferSize)
-            val result = usbDevice.bulkTransfer(bytes, bufferSize)
-            if (result == 0) {
-                println("Read empty buffer from device")
-                continue
-            } else if (result < 0) {
-                throw IOException("Error reading from device: $result")
-            }
-            emit(bytes)
+    fun <T> runPlugin(plugin: Plugin<ByteArray, T>): Flow<T> {
+        allocateBuffersAsync()
+        buffers.forEach { _ ->
+            usbDevice.submitBulkTransfer()
         }
-    }
 
-    private fun readAsync() {
-        Status.setIOStatus(IOStatus.ACTIVE)
-        scope.launch {
-            allocateBuffersAsync()
-            while (this.isActive) {
-                if (ioStatus() == IOStatus.ACTIVE) {
-                    buffers.forEachIndexed { i, buf ->
-                        usbDevice.submitBulkTransfer(buf)
-                        usbDevice.waitForTransferResult().let {
-                            val bytesRead = buf.position()
-                            if (bytesRead == 0) {
-                                cancel("Read 0 bytes from buffer $it")
-                            }
-                            val bytes = ByteArray(bytesRead)
-                            buf.rewind()
-
-                            buf.get(bytes)
-                            rawFlow.emit(bytes)
-                            buf.clear()
-                        }
-                    }
-                } else {
-                    cancel()
-                }
-            }
-        }
+        return plugin.invoke(
+            usbDevice.readBytes().shareIn(scope, SharingStarted.WhileSubscribed())
+        )
+            .buffer()
     }
 
 
-    private suspend fun allocateBuffersAsync() {
-        for (i in 0.until(numBuffers)) {
+    private fun allocateBuffersAsync() {
+        for (i in buffers.size until (numBuffers)) {
             val buffer = ByteBuffer.allocateDirect(
                 bufferSize
             )
             buffers.add(buffer)
-            usbDevice.prepareNewBulkTransfer(
-                i, buffer
-            )
+            usbDevice.prepareNewBulkTransfer(buffer)
         }
     }
 
@@ -498,71 +452,67 @@ open class RTLDevice(private val usbDevice: UsbIFace,
             true -> 0x18
             else -> 0x10
         }
-        demodWriteReg(1, 0x01, i, 1)
+        demodulatorWriteReg(1, 0x01, i, 1)
     }
 
-    fun setSampleFrequencyCorrection(ppm: Int): Int {
+    fun setSampleFrequencyCorrection(ppm: Int) {
         val offset = (ppm * -1) * 2.0.pow(24) / 1000000
         var tmp = offset.toInt() and 0xff
         var r = 0
-        r = r or demodWriteReg(1, 0x3f, tmp, 1)
+        demodulatorWriteReg(1, 0x3f, tmp, 1)
         tmp = (offset.toInt() shr 8) and 0x3f
-        r = r or demodWriteReg(1, 0x3e, tmp, 1)
-        return r
+        demodulatorWriteReg(1, 0x3e, tmp, 1)
     }
 
-    fun setSampleRate(rate: Int): Int {
-        var r = 0
+    fun setSampleRate(rate: Int) {
         var realRsampRatio = 0
         var realRate = 0.0
         if ((rate !in (22500..3200000)) || (rate in (300001..900000))) {
             val msg = "Invalid sample rate: ${rate}Hz"
             throw IllegalArgumentException(msg)
         }
-        var rsampRatio: Int = (tunableDevice.rtlXtal() * TWO_22_POW / rate).roundToInt()
+        var rsampRatio: Int = (rtlXtal() * TWO_22_POW / rate).roundToInt()
         rsampRatio = rsampRatio and 0x0ffffffc
         realRsampRatio = rsampRatio or ((rsampRatio and 0x08000000) shl 1)
-        realRate = (tunableDevice.rtlXtal() * TWO_22_POW / realRsampRatio)
+        realRate = (rtlXtal() * TWO_22_POW / realRsampRatio)
         println("Exact sample rate set to ${realRate}Hz")
         var tmp = rsampRatio shr 16
-        r = (r or demodWriteReg(1, 0x9f, tmp, 2))
+        demodulatorWriteReg(1, 0x9f, tmp, 2)
         tmp = rsampRatio and 0xffff
-        r = (r or demodWriteReg(1, 0xa1, tmp, 2))
-        r = (r or setSampleFrequencyCorrection(tunableDevice.ppmCorrection))
+        demodulatorWriteReg(1, 0xa1, tmp, 2)
+        setSampleFrequencyCorrection(ppmCorrection)
+        demodulatorWriteReg(1, 0x01, 0x14, 1)
+        demodulatorWriteReg(1, 0x01, 0x10, 1)
+        this.rate = realRate.roundToInt()
 
-        r = (r or demodWriteReg(1, 0x01, 0x14, 1))
-        r = (r or demodWriteReg(1, 0x01, 0x10, 1))
-        tunableDevice.rate = realRate.roundToInt()
-
-        return r
     }
 
     fun setIFFreq(freq: Long) {
-        val ifFreq = ((freq * TWO_22_POW) / tunableDevice.getXtalFreq() * (-1)).toInt()
+        val ifFreq = ((freq * TWO_22_POW) / getXtalFreq() * (-1)).toInt()
 
         // write byte 2
         var i = (ifFreq shr 16) and 0x3f
-        demodWriteReg(1, 0x19, i, 1)
+        demodulatorWriteReg(1, 0x19, i, 1)
 
         // write byte one
         i = (ifFreq shr 8) and 0xff
-        demodWriteReg(1, 0x1a, i, 1)
+        demodulatorWriteReg(1, 0x1a, i, 1)
 
         // write byte 2
         i = ifFreq and 0xff
-        demodWriteReg(1, 0x1b, i, 1)
+        demodulatorWriteReg(1, 0x1b, i, 1)
     }
 
     fun setCenterFreq(freq: Long) {
-        if (tunableDevice.directSampling) {
+        if (directSampling) {
             setIFFreq(freq)
         }
         setI2cRepeater(1)
-        tunableDevice.setFrequency(freq)
+        setFrequency(freq)
         setI2cRepeater(0)
     }
 
-    fun getCenterFreq() = tunableDevice.getTunedFrequency()
+    fun getCenterFreq() = getTunedFrequency()
 
     private fun checkError(result: Int, i: UInt? = null, i2: Int? = null) {
         if (result < 0) {
@@ -577,7 +527,7 @@ open class RTLDevice(private val usbDevice: UsbIFace,
 
 
         const val CTRL_TIMEOUT = 300
-        const val DEFAULT_RTL_XTAL_FREQ = 288000000
+        const val DEFAULT_RTL_XTAL_FREQ = 28800000
         private const val REQUEST_TYPE_VENDOR: Byte = 0x02 shl 5
         private const val ENDPOINT_IN: Byte = 0x80.toByte()
         private const val ENDPOINT_OUT: Byte = 0x00.toByte()
@@ -635,7 +585,7 @@ open class RTLDevice(private val usbDevice: UsbIFace,
             const val USB_EPA_FIFO_CFG = 0x2160
         }
 
-        private var fir = shortArrayOf(
+        private var fir = intArrayOf(
             -54, -36, -41, -40, -32, -14, 14, 53,    /* 8 bit signed */
             101, 156, 215, 273, 327, 372, 404, 421    /* 12 bit signed */
         )

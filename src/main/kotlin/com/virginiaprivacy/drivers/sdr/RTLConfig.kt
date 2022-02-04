@@ -1,9 +1,6 @@
 package com.virginiaprivacy.drivers.sdr
 
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 
-@ExperimentalCoroutinesApi
-@ExperimentalUnsignedTypes
 open class RTLConfig(
     var maxI2cMsgLen: Int = 8,
     var usePreDetect: Boolean = false,

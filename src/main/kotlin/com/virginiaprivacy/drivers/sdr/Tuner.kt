@@ -1,9 +1,6 @@
 package com.virginiaprivacy.drivers.sdr
 
 import com.virginiaprivacy.drivers.sdr.r2xx.R82xxChip
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-
-@ExperimentalCoroutinesApi
 
 enum class Tuner(
     val i2cAddress: Int,
@@ -20,8 +17,6 @@ enum class Tuner(
     RTLSDR_TUNER_FC2580(0xac, 0x01, 86, R82xxChip.UNKNOWN);
 
 
-    @ExperimentalUnsignedTypes
-    @ExperimentalCoroutinesApi
     companion object {
 
         fun tunerType(device: RTLDevice): Tuner =

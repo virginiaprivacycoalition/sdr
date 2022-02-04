@@ -1,14 +1,27 @@
 package com.virginiaprivacy.drivers.sdr.usb
 
+import kotlinx.coroutines.flow.Flow
 import java.nio.ByteBuffer
 
 interface UsbIFace {
 
+    /**
+     * The product name from the USB device descriptors
+     */
     val productName: String
 
+    /**
+     * The serial number from the USB device descriptors
+     */
     val serialNumber: String
 
+    /**
+     * The manufacturer name from the USB device descriptors
+     */
     val manufacturerName: String
+
+
+    fun readBytes(): Flow<ByteArray>
 
     /**
      * This function should implement the control transfer of config to/from the USB Device's
@@ -20,38 +33,32 @@ interface UsbIFace {
      */
     fun controlTransfer(
         direction: Int,
-        requestID: Int,
-        address: Int,
-        index: Int,
-        bytes: ByteArray,
+        address: Short,
+        index: Short,
+        bytes: ByteBuffer,
         length: Int,
         timeout: Int
-    ) : Int
+    ): ControlTransferResult
 
     suspend fun bulkTransfer(
         bytes: ByteArray,
-        length: Int) : Int
+        length: Int
+    ): Int
 
     /**
      * This function should initiate instances anything needed to queue and submit a bulk transfer
      * request. For example, on Android this would entail creating a new UsbRequest and keeping the
      * request to use for later during [submitBulkTransfer].
      */
-    suspend fun prepareNewBulkTransfer(transferIndex: Int, byteBuffer: ByteBuffer)
+    fun prepareNewBulkTransfer(byteBuffer: ByteBuffer)
 
     /**
      * This function should initiate and enqueue the bulk USB transfer at index [transferIndex] and
      * supply the given [ByteBuffer] [buffer] to be read into or written from. It is important that
      * this function doesn't manipulate, copy, or store any references to the supplied [ByteBuffer]
      */
-    suspend fun submitBulkTransfer(buffer: ByteBuffer)
+    fun submitBulkTransfer()
 
-    /**
-     * This function should wait until a transfer is completed and the data has been written to the
-     * [ByteBuffer]
-     * @return the index as an Int of the transfer index that was submitted with [submitBulkTransfer]
-     */
-    suspend fun waitForTransferResult(): Int
 
     /**
      * This function should take any steps necessary to claim exclusive access to the read/write
@@ -66,5 +73,7 @@ interface UsbIFace {
     fun releaseUsbDevice()
 
     fun shutdown()
+
+    fun resetDevice()
 
 }

@@ -2,10 +2,7 @@ package com.virginiaprivacy.drivers.sdr.r2xx
 
 import com.virginiaprivacy.drivers.sdr.RTLConfig
 import com.virginiaprivacy.drivers.sdr.Tuner
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 
-@ExperimentalCoroutinesApi
-@ExperimentalUnsignedTypes
 class R82xxConfig constructor(
     tuner: Tuner,
     maxI2cMsgLen: Int = 8,

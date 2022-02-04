@@ -2,13 +2,9 @@ package com.virginiaprivacy.drivers.sdr.data
 
 import com.virginiaprivacy.drivers.sdr.IOStatus
 import com.virginiaprivacy.drivers.sdr.precision
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
-import java.util.concurrent.atomic.AtomicLong
-import kotlin.time.Duration
-import kotlin.time.ExperimentalTime
 
 object Status {
 
@@ -46,7 +42,9 @@ object Status {
 
     fun getIOStatus() = ioStatus.asStateFlow()
 
-    private fun updateReadSpeed(long: Long) { readSpeed.value = ((long.toDouble() / runTime().toDouble()).precision()) }
+    private fun updateReadSpeed(long: Long) {
+        readSpeed.value = ((long.toDouble() / runTime().toDouble()).precision())
+    }
 
     private fun updateProcessingSpeed(long: Long) {
         processSpeed.value = ((long.toDouble() / pluginRunTime()).precision())

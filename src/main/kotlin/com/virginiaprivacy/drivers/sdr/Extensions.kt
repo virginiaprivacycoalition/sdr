@@ -1,11 +1,19 @@
 package com.virginiaprivacy.drivers.sdr
 
-import com.virginiaprivacy.drivers.sdr.plugins.Plugin
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.asCoroutineDispatcher
-import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.launch
-import java.util.concurrent.Executors
+operator fun IntArray.get(byte: Byte): Int {
+    return this[(byte and 0XFF).toInt()]
+}
+
+operator fun ByteArray.get(byte: Byte): Byte {
+    return this[(byte and 0XFF).toInt()]
+}
+
+infix fun <T : Number> Byte.and(int: T) = this.toInt().and(int.toInt()).toByte()
+
+infix fun Byte.shl(pos: Int) = this.toInt().shl(pos)
+
+infix fun Byte.shr(pos: Int) = this.toInt().shr(pos)
+
 
 fun Int.uint8(): Int {
     return if (this >= 127) {
@@ -25,15 +33,6 @@ fun Double.precision(decimals: Int = 2): Double = "%.${decimals}f".format(this).
 fun String.precision(decimals: Int = 2): String = "%.${decimals}s".format(this)
 
 
-val Plugin.scope: CoroutineScope
-    get() = CoroutineScope(Executors.newSingleThreadExecutor().asCoroutineDispatcher())
 
-fun Plugin.run(device: RTLDevice) {
-    println("${this::class.qualifiedName} setup complete. . . Now running")
-    scope.launch {
-        device.rawFlow
-            .collect {
-                processSignalBuffer(buf = it)
-            }
-    }
-}
+
+
