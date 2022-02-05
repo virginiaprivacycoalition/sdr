@@ -222,6 +222,98 @@ class R82XX constructor(
         initDone = true
     }
 
+    fun setBandwidth(input: Int, rate: Long) {
+        var bw = input
+        var realBW = 0
+        var i = 0
+        var reg0a = 0
+        var reg0b = 0
+        var intFreq = 0
+
+        if (bw > 7000000) {
+            reg0a = 0x10
+            reg0b = 0x0b
+            intFreq = 4570000
+        } else if (bw > 6000000) {
+            reg0a = 0x10
+            reg0b = 0x2a
+            intFreq = 4570000
+        } else if (bw > IF_LOWPASS_BANDWIDTH_TABLE[0] + FILT_HP_BW1 + FILT_HP_BW2) {
+            reg0a = 0x10
+            reg0b = 0x6b
+            intFreq = 3570000
+        } else {
+            reg0a = 0x00
+            reg0b = 0x80
+            intFreq = 2300000
+
+
+            if (bw > IF_LOWPASS_BANDWIDTH_TABLE[0] + FILT_HP_BW1) {
+                bw -= FILT_HP_BW2
+                intFreq += FILT_HP_BW1
+                realBW += FILT_HP_BW1
+            } else {
+                reg0b = (reg0b or 0x40)
+            }
+
+            if (bw > IF_LOWPASS_BANDWIDTH_TABLE[0]) {
+                bw -+ FILT_HP_BW1
+                intFreq += FILT_HP_BW1
+            } else {
+                reg0b = (reg0b or 0x40)
+            }
+
+            while (i < IF_LOWPASS_BANDWIDTH_TABLE.size) {
+                if (bw > IF_LOWPASS_BANDWIDTH_TABLE[i]) {
+                    break
+                }
+                --i
+                reg0b = reg0b or (15 - i)
+                realBW += IF_LOWPASS_BANDWIDTH_TABLE[i]
+                intFreq -= realBW / 2
+                i++
+
+            }
+        }
+        writeRegMask(0x0a, reg0a, 0x10)
+        writeRegMask(0x0b, reg0b, 0xef)
+
+    }
+
+    /**
+
+    if (bw > r82xx_if_low_pass_bw_table[0]) {
+    bw -= FILT_HP_BW1;
+    priv->int_freq += FILT_HP_BW1;
+    real_bw += FILT_HP_BW1;
+    } else {
+    reg_0b |= 0x40;
+    }
+
+    // find low-pass filter
+    for(i = 0; i < ARRAY_SIZE(r82xx_if_low_pass_bw_table); ++i) {
+    if (bw > r82xx_if_low_pass_bw_table[i])
+    break;
+    }
+    --i;
+    reg_0b |= 15 - i;
+    real_bw += r82xx_if_low_pass_bw_table[i];
+
+    priv->int_freq -= real_bw / 2;
+    }
+
+    rc = r82xx_write_reg_mask(priv, 0x0a, reg_0a, 0x10);
+    if (rc < 0)
+    return rc;
+
+    rc = r82xx_write_reg_mask(priv, 0x0b, reg_0b, 0xef);
+    if (rc < 0)
+    return rc;
+
+    return priv->int_freq;
+    }
+     */
+
     private fun bitrev(byte: Byte): Byte =
         ((lut[(byte and 0xFF) and 0xf].shl(4)) or lut[(byte and 0xFF) shr 4].toInt()).toByte()
 
@@ -360,6 +452,10 @@ class R82XX constructor(
 
     }
 
+    private fun getStatusRegister(register: Int): Int {
+        return bitRev((i2cRead(config.i2cAddr, 5)[register] and 0xFF).toUByte())
+    }
+
     @Throws(PllNotLockedException::class)
     private fun setTVStandard(bw: Int, r82xxTunerType: R82xxTunerType, delsys: Long) {
         val filtGain = 0x10
@@ -374,6 +470,47 @@ class R82XX constructor(
         initArray.forEachIndexed { index, i ->
             regs[index] = i
         }
+
+        R82XXRegister.XTAL_CHECK.write(0x00)
+        R82XXRegister.VERSION.write(VER_NUM)
+        R82XXRegister.LNA_TOP.write(0x00)
+        var calibrationCode = 0
+        repeat(2) { i ->
+            R82XXRegister.FILTER_CAPACITOR.write(0x6B)
+            R82XXRegister.CALIBRATION_CLOCK.write(0x04)
+            R82XXRegister.XTAL_CAP.write(0x00)
+            setPll(56000 * 1000)
+            R82XXRegister.CALIBRATION_TRIGGER.write(0x10)
+            R82XXRegister.CALIBRATION_TRIGGER.write(0x00)
+            R82XXRegister.CALIBRATION_CLOCK.write(0x00)
+            calibrationCode = getStatusRegister(4) and 0x0F
+
+            if (calibrationCode != 0 && calibrationCode != 0x0F) {
+                println("Calibration failed with error code $calibrationCode")
+            }
+        }
+
+        if (calibrationCode == 0x0F)
+            calibrationCode = 0
+
+        R82XXRegister.FILTER_CALIBRATION_CODE.write(calibrationCode or 0x10)
+
+        R82XXRegister.BANDWIDTH_FILTER_GAIN_HIGHPASS_FILTER_CORNER.write(0x6B)
+
+        R82XXRegister.IMAGE_REVERSE.write(0x00)
+
+        R82XXRegister.FILTER_GAIN.write(0x10)
+
+        R82XXRegister.CHANNEL_FILTER_EXTENSION.write(0x60)
+
+        R82XXRegister.LOOP_THROUGH.write(0x00)
+
+        R82XXRegister.LOOP_THROUGH_ATTENUATION.write(0x00)
+
+        R82XXRegister.FILTER_EXTENSION_WIDEST.write(0x00)
+
+        R82XXRegister.RF_POLY_FILTER_CURRENT.write(0x60)
+
 
         writeRegMask(0x0c, 0x00, 0x0f)
         writeRegMask(0x13, VER_NUM, 0x3f)
@@ -522,6 +659,8 @@ class R82XX constructor(
 
     enum class R82XXRegister(override val address: Int, override val mask: Int) : Reg {
 
+        LOOP_THROUGH(0x05, 0x80),
+
 
         /**
          * LNA AGC control
@@ -540,6 +679,12 @@ class R82XX constructor(
          *
          */
         LNA_GAIN(0x05, 0x0f),
+
+        FILTER_GAIN(0x06, 0x30),
+
+
+        IMAGE_REVERSE(0x07, 0x80),
+
 
         MIXER_GAIN(0x07, 0x1F),
 
@@ -562,6 +707,25 @@ class R82XX constructor(
          */
         MIXER_BUFFER_POWER(0x08, 0x3f),
 
+        FILTER_CALIBRATION_CODE(0x0A, 0x1F),
+
+        BANDWIDTH_FILTER_GAIN_HIGHPASS_FILTER_CORNER(0x0B, 0xEF),
+
+        CALIBRATION_TRIGGER(0x0B, 0x10),
+
+
+        FILTER_CAPACITOR(0x0B, 0x60),
+
+        /**
+         * Calibration clock
+         * 0x04: Enable
+         */
+        CALIBRATION_CLOCK(0x0F, 0x04),
+        FILTER_EXTENSION_WIDEST(0x0F, 0x80),
+
+
+
+
         /**
          * Mixer gain power
          * Used in combination with [MIXER_GAIN] to control the mixer Gain setting
@@ -572,6 +736,9 @@ class R82XX constructor(
          * 0: High-Z 1: Low-Z
          */
         OPEN_D(0x17, 0x08),
+
+        RF_POLY_FILTER_CURRENT(0x19, 0x60),
+
 
         /**
          * Tracking filter switch
@@ -601,6 +768,7 @@ class R82XX constructor(
          */
         PLL_REFDIV(0x10, 0x10),
 
+        XTAL_CHECK(0x0C, 0x0F),
         /**
          * PLL autotune clockrate
          * 00: 128 khz
@@ -608,6 +776,8 @@ class R82XX constructor(
          * 10: 8khz
          */
         PLL_AUTOTUNE_CLOCKRATE(0x1A, 0x0C),
+
+        VERSION(0x12, 0xE0),
 
         /**
          * ?
@@ -619,7 +789,15 @@ class R82XX constructor(
         /**
          * Sets the amount of VGA gain. Used in combination with [VGA_GAIN]
          */
-        VGA_GAIN(0x0C, 0x1f)
+        VGA_GAIN(0x0C, 0x1f),
+
+        LNA_TOP(0x1D, 0x38),
+
+        LNA_TOP2(0x1D, 0xC7),
+
+        CHANNEL_FILTER_EXTENSION(0x1E, 0x60),
+
+        LOOP_THROUGH_ATTENUATION(0x1F, 0x80)
 
 
     }
