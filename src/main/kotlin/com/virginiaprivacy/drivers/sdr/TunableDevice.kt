@@ -1,5 +1,7 @@
 package com.virginiaprivacy.drivers.sdr
 
+import com.virginiaprivacy.drivers.sdr.r2xx.Reg
+
 interface TunableDevice : TunableGain {
 
     val config: RTLConfig
@@ -19,13 +21,7 @@ interface TunableDevice : TunableGain {
 
     fun setFrequency(freq: Long)
 
-    fun getTunedFrequency(): Long
-
-    fun writeReg(reg: Int, value: Int)
-
-    fun read(reg: Int, len: Int): ByteArray
-
-    fun writeRegMask(reg: Int, value: Int, bitMask: Int)
+    fun writeReg(reg: Reg, value: Byte)
 
     fun init()
 }

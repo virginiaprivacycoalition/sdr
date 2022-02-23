@@ -1,11 +1,11 @@
 plugins {
-    kotlin("jvm") version "1.6.10"
+    kotlin("jvm") version "1.6.20-M1"
     java
     id("maven-publish")
 }
 
 group = "com.github.virginiaprivacycoalition"
-version = "0.6.1-test"
+version = "0.7.2"
 
 repositories {
     mavenCentral()
@@ -30,7 +30,7 @@ publishing {
         create<MavenPublication>("release") {
             group = "com.github.virginiaprivacycoalition"
             artifactId = "sdr"
-            version = "0.6.1-test"
+            version = "0.7.2"
             from(components["java"])
             artifact(tasks.kotlinSourcesJar)
         }

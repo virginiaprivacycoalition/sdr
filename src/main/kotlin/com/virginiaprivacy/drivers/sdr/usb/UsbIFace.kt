@@ -1,5 +1,6 @@
 package com.virginiaprivacy.drivers.sdr.usb
 
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import java.nio.ByteBuffer
 
@@ -21,6 +22,7 @@ interface UsbIFace {
     val manufacturerName: String
 
 
+
     fun readBytes(): Flow<ByteArray>
 
     /**
@@ -35,9 +37,7 @@ interface UsbIFace {
         direction: Int,
         address: Short,
         index: Short,
-        bytes: ByteBuffer,
-        length: Int,
-        timeout: Int
+        bytes: ByteBuffer
     ): ControlTransferResult
 
     suspend fun bulkTransfer(
@@ -77,3 +77,4 @@ interface UsbIFace {
     fun resetDevice()
 
 }
+

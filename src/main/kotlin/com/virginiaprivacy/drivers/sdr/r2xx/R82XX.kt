@@ -5,7 +5,7 @@ import com.virginiaprivacy.drivers.sdr.exceptions.PllNotLockedException
 import com.virginiaprivacy.drivers.sdr.exceptions.TunerNotInitializedException
 import com.virginiaprivacy.drivers.sdr.r2xx.R82xxChip.CHIP_R828D
 import com.virginiaprivacy.drivers.sdr.usb.UsbIFace
-import java.io.IOException
+import java.nio.ByteBuffer
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 import kotlin.experimental.and
@@ -14,6 +14,12 @@ import kotlin.experimental.and
 class R82XX constructor(
     private val usbIFace: UsbIFace
 ) : TunableDevice, TunableGain, RTLDevice(usbIFace) {
+
+
+    private val shadowRegister = arrayOf(0x00, 0x00, 0x00, 0x00, 0x00, 0x83, 0x32, 0x75,
+        0xC0, 0x40, 0xD6, 0x6C, 0xF5, 0x63, 0x75, 0x68,
+        0x6C, 0x83, 0x80, 0x00, 0x0F, 0x00, 0xC0, 0x30,
+        0x48, 0xCC, 0x60, 0x00, 0x54, 0xAE, 0x4A, 0xC0)
 
 
     /**
@@ -73,12 +79,7 @@ class R82XX constructor(
         set(value) {
             value?.let {
                 if (value == _currentFrequencyRange) return
-                R82XXRegister.OPEN_D.write(it.openD)
-                R82XXRegister.RFMUX.write(it.rfMuxPloy)
-                R82XXRegister.TF_BAND.write(it.tfC)
-                R82XXRegister.XTAL_CAP.write(it.xtalCap0p)
-                R82XXRegister.MIXER_BUFFER_POWER.write(0x00)
-                R82XXRegister.IF_FILTER_POWER.write(0x00)
+
             }
             _currentFrequencyRange = value
         }
@@ -97,39 +98,39 @@ class R82XX constructor(
     override var lnaGain: LNA_GAIN
         get() = mLnaGain
         set(value) {
-            setI2cRepeater(1)
+            enableI2CRepeater(true)
             lock.withLock {
                 if (mLnaGain != value) {
                     mLnaGain = value
-                    writeRegMask(0x05, value.value, 0x0f)
+                    R82XXRegister.LNA_GAIN.write(value.value)
                 }
             }
-            setI2cRepeater(0)
+            enableI2CRepeater(false)
         }
 
     override var vgaGain: VGA_GAIN
         get() = mVgaGain
         set(value) {
-            setI2cRepeater(1)
+            enableI2CRepeater(true)
             lock.withLock {
                 if (mVgaGain != value) {
                     mVgaGain = value
                     R82XXRegister.VGA_GAIN.write(mVgaGain.value)
                 }
             }
-            setI2cRepeater(0)
+            enableI2CRepeater(false)
         }
     override var mixerGain: MIXER_GAIN
         get() = mMixerGain
         set(value) {
-            setI2cRepeater(1)
+            enableI2CRepeater(true)
             lock.withLock {
                 if (mMixerGain != value) {
                     mMixerGain = value
                     R82XXRegister.MIXER_GAIN.write(mMixerGain.value)
                 }
             }
-            setI2cRepeater(0)
+            enableI2CRepeater(false)
         }
 
     private fun throwUninitializedError() {
@@ -151,73 +152,30 @@ class R82XX constructor(
         }
     }
 
-    private fun r82xxWrite(reg: Int, value: ByteArray, len: Int) {
-        shadowStore(reg, value, len)
-        var len2 = len
-        var pos = 0
-        var reg2 = reg
-        do {
-            val size = if (len > config.maxI2cMsgLen - 1) {
-                config.maxI2cMsgLen - 1
-            } else {
-                len
-            }
-            val buffer = ByteArray(size)
-            buf[0] = reg2.toUByte().toByte()
-            buffer[0] = buf[0]
-            for ((index, i) in (1 until size).withIndex()) {
-                buffer[i] = value[index].toUByte().toByte()
-            }
-
-            if (buffer.size >= config.maxI2cMsgLen) {
-                throw IOException("Buffer of size ${buffer.size} is bigger than max i2c message length of ${config.maxI2cMsgLen}")
-            }
-
-            i2cWrite(config.i2cAddr, buffer, buffer.size)
-
-
-            reg2 += size
-            len2 -= size
-            pos += size
-        } while (len2 > 0)
-    }
-
-    override fun writeReg(reg: Int, value: Int) {
-        r82xxWrite(reg, byteArrayOf(value.toByte()), 1)
-    }
-
-    private fun r82xxReadCacheReg(reg: Int): Int {
-        val reg2 = reg - REG_SHADOW_START
-        if (reg2 in 0 until NUM_REGS) {
-            return regs[reg2]
-        }
-        return -1
-    }
-
-    override fun writeRegMask(reg: Int, value: Int, bitMask: Int) {
-        val rc = r82xxReadCacheReg(reg)
-        if (rc < 0) return
-        val value2 = (rc and bitMask.inv()) or (value and bitMask)
-        return r82xxWrite(reg, byteArrayOf(value2.toUByte().toByte()), 1)
+    override fun writeReg(reg: Reg, value: Byte) {
+        val maskedValue = if (reg.isMasked) { ((shadowRegister[reg.address] and reg.mask.inv()) or (value.toInt() and reg.mask)).toByte() } else { value }
+        i2cWriteRegister(config.i2cAddr, reg.address.toByte(), value)
+        shadowRegister[reg.address] = maskedValue.toInt()
     }
 
     override fun init() {
 
         // disable 0-if mode
-        super.demodulatorWriteReg(1, 0xb1, 0x1a, 1)
+        super.writeDemodRegister(1, 0xb1, 0x1a, 1)
 
         // enable in-phase ADC
-        super.demodulatorWriteReg(0, 0x08, 0x4D, 1)
+        super.writeDemodRegister(0, 0x08, 0x4D, 1)
 
         super.setIFFreq(R82XX_IF_FREQ)
 
         // enable spectrum inversion
-        super.demodulatorWriteReg(1, 0x15, 0x01, 1)
+        super.writeDemodRegister(1, 0x15, 0x01, 1)
 
-
+        for (i in 5.until(shadowRegister.size)) {
+            i2cWriteRegister(config.i2cAddr, i.toByte(), shadowRegister[i].toByte())
+        }
         xtalCapSel = R82xxXtalCapValue.XTAL_HIGH_CAP_0P
-        r82xxWrite(0x05, initArray.map { it.toByte() }.toByteArray(), initArray.size)
-        setTVStandard(3, R82xxTunerType.TUNER_DIGITAL_TV, 0)
+        setTVStandard()
         sysFreqSelect(0)
         initDone = true
     }
@@ -275,44 +233,11 @@ class R82XX constructor(
 
             }
         }
-        writeRegMask(0x0a, reg0a, 0x10)
-        writeRegMask(0x0b, reg0b, 0xef)
+        //writeRegMask(0x0a, reg0a, 0x10)
+        R82XXRegister.BANDWIDTH_FILTER_GAIN_HIGHPASS_FILTER_CORNER.write(reg0b)
 
     }
 
-    /**
-
-    if (bw > r82xx_if_low_pass_bw_table[0]) {
-    bw -= FILT_HP_BW1;
-    priv->int_freq += FILT_HP_BW1;
-    real_bw += FILT_HP_BW1;
-    } else {
-    reg_0b |= 0x40;
-    }
-
-    // find low-pass filter
-    for(i = 0; i < ARRAY_SIZE(r82xx_if_low_pass_bw_table); ++i) {
-    if (bw > r82xx_if_low_pass_bw_table[i])
-    break;
-    }
-    --i;
-    reg_0b |= 15 - i;
-    real_bw += r82xx_if_low_pass_bw_table[i];
-
-    priv->int_freq -= real_bw / 2;
-    }
-
-    rc = r82xx_write_reg_mask(priv, 0x0a, reg_0a, 0x10);
-    if (rc < 0)
-    return rc;
-
-    rc = r82xx_write_reg_mask(priv, 0x0b, reg_0b, 0xef);
-    if (rc < 0)
-    return rc;
-
-    return priv->int_freq;
-    }
-     */
 
     private fun bitrev(byte: Byte): Byte =
         ((lut[(byte and 0xFF) and 0xf].shl(4)) or lut[(byte and 0xFF) shr 4].toInt()).toByte()
@@ -322,43 +247,28 @@ class R82XX constructor(
             .toInt() shr 4].toUInt().toInt()
     }
 
-    override fun read(reg: Int, len: Int): ByteArray {
-        buf[0] = reg.toByte()
-        val buffer = ByteArray(1) {
-            buf[0]
-        }
 
-        i2cWrite(config.i2cAddr, buffer, 1)
-
-        val result = i2cRead(config.i2cAddr, len)
-        return result.map { it and 0XFF }.map { bitRev(it.toUByte()).toByte() }.toByteArray()
-    }
 
 
     private fun setMux(freq: Long) {
         val mhz = (freq * 4295).shr(32)
-        currentFrequencyRange = frequencyRanges[getFrequencyIndex(mhz)]
+        println("Frequency converted to $mhz megahertz")
+        frequencyRanges[getFrequencyIndex(mhz)].let {
+            R82XXRegister.OPEN_D.write(it.openD)
+            R82XXRegister.RFMUX.write(it.rfMuxPloy)
+            R82XXRegister.TF_BAND.write(it.tfC)
+            R82XXRegister.XTAL_CAP.write(it.xtalCap0p)
+            R82XXRegister.MIXER_BUFFER_POWER.write(0x00)
+            R82XXRegister.IF_FILTER_POWER.write(0x00)
+        }
     }
 
     private fun readGain(): Int {
-        val result = read(0x00, 4)
-        return (result[3] and 0x0F shl 1) + ((result[3] and 0xf0) shr 4)
+        val buffer = ByteBuffer.allocateDirect(3)
+       read(0x00, 4, buffer)
+        return (buffer[3] and 0x0F shl 1) + ((buffer[3] and 0xf0) shr 4)
     }
 
-    fun standBy() {
-        if (!initDone) return
-        writeReg(0x06, 0xb1)
-        writeReg(0x05, 0xa0)
-        writeReg(0x07, 0x3a)
-        writeReg(0x08, 0x40)
-        writeReg(0x09, 0xc0)
-        writeReg(0x0a, 0x36)
-        writeReg(0x0c, 0x35)
-        writeReg(0x0f, 0x68)
-        writeReg(0x11, 0x03)
-        writeReg(0x17, 0xf4)
-        writeReg(0x19, 0x0c)
-    }
 
     private fun setPll(freq: Long) {
         val vcoMin = 1770000
@@ -378,6 +288,7 @@ class R82XX constructor(
         R82XXRegister.PLL_REFDIV.write(0x00)
         R82XXRegister.PLL_AUTOTUNE_CLOCKRATE.write(0x00)
         R82XXRegister.VCO_CURRENT.write(0x80)
+
         while (mixDiv <= 64) {
             if ((freqKhz * mixDiv >= vcoMin) && (freqKhz * mixDiv < vcoMax)) {
                 divBuf = mixDiv
@@ -389,17 +300,19 @@ class R82XX constructor(
             }
             mixDiv = mixDiv shl 1
         }
-        val data = read(0x00, 5)
+
+        val statusRegister4 = getStatusRegister(4) and 0x30
+        val vcoFineTune = statusRegister4 shr 4
+
         if (config.rafaelChip == CHIP_R828D) {
             vcoPowerRef = 1
         }
-        val vcoFineTune = (data[4].toInt() and 0x30) shr 4
         if (vcoFineTune > vcoPowerRef) {
             divNum -= 1
         } else if (vcoFineTune < vcoPowerRef) {
             divNum += 1
         }
-        writeRegMask(0x10, divNum shl 5, 0xe0)
+        R82XXRegister.DIVIDER.write(divNum shl 5)
         val vcoFreq = freq * mixDiv.toLong()
         val nint = vcoFreq / (2 * pllRef)
         val vcoFra = (vcoFreq - 2 * pllRef * nint) / 1000
@@ -411,12 +324,12 @@ class R82XX constructor(
 
         val ni = (nint - 13) / 4
         val si = nint - 4 * ni - 13
-        writeReg(0x14, (ni + (si.toInt() shl 6)).toInt())
+        R82XXRegister.PLL.write(((ni + (si.toInt() shl 6)).toInt()))
         val value = if (vcoFra != 0L) {
             0x08
         } else
             0x00
-        writeRegMask(0x12, value, 0x08)
+        R82XXRegister.SDM_POWER.write(value)
 
         while (vcoFra > 1) {
             if (vcoFra > (2 * refKhz / nSdm)) {
@@ -427,37 +340,46 @@ class R82XX constructor(
             }
             nSdm = nSdm shl 1
         }
-        writeReg(0x16, sdm shr 8)
-        writeReg(0x15, sdm and 0xff)
+        println("sdm: $sdm nsdm: $nSdm")
+        if (sdm != 0) {
+            R82XXRegister.SDM_MSB.write((sdm shr 8 and 0xFF))
+            R82XXRegister.SDM_LSB.write(sdm and 0xFF)
+        }
 
         var r: ByteArray? = null
         repeat(2) {
-            r = read(0x00, 3)
-            if ((r!![2].toInt() and 64) == 0) {
+            val pll = pllLocked()
+            if (!pll) {
                 if (it > 0) {
-                    writeRegMask(0x12, 0x60, 0xe0)
+                    R82XXRegister.VCO_CURRENT.write(0x60)
                 }
             }
         }
 
-        if (r!![2].and(64) != 0.toByte()) {
-            error("PLL not locked: bytes: ${r!!.toList()}, bytes[2]: ${r!![2].toInt()} ")
+        if (!pllLocked()) {
+            error("PLL not locked!!")
             hasLock = false
             return
         }
         hasLock = true
 
-        writeRegMask(0x1a, 0x08, 0x08)
-
+        R82XXRegister.PLL_AUTOTUNE2.write(0x08)
 
     }
 
     private fun getStatusRegister(register: Int): Int {
-        return bitRev((i2cRead(config.i2cAddr, 5)[register] and 0xFF).toUByte())
+        val buffer = ByteBuffer.allocateDirect(5)
+        val index = 6.toShort().rotateLeft(8)
+        println("i2c address: ${config.i2cAddr.toShort()} index: $index,")
+        read(config.i2cAddr.toShort(), index, buffer)
+
+        return bitRev((buffer[register] and 0xFF).toUByte())
     }
 
+    private fun pllLocked(): Boolean = (getStatusRegister(2) and 0x40) == 0x40
+
     @Throws(PllNotLockedException::class)
-    private fun setTVStandard(bw: Int, r82xxTunerType: R82xxTunerType, delsys: Long) {
+    private fun setTVStandard() {
         val filtGain = 0x10
         val imgR = 0x00
         val filtQ = 0x10
@@ -511,81 +433,34 @@ class R82XX constructor(
 
         R82XXRegister.RF_POLY_FILTER_CURRENT.write(0x60)
 
-
-        writeRegMask(0x0c, 0x00, 0x0f)
-        writeRegMask(0x13, VER_NUM, 0x3f)
-        writeRegMask(0x1d, 0x00, 0x38)
-
-
-        val needCalibration = true
-
-        if (needCalibration) {
-            repeat(2) { i ->
-                writeRegMask(11, hpCor, 0x60)
-                writeRegMask(15, 4, 0x04)
-                writeRegMask(16, 0, 0x03)
-                setPll((56000 * 1000).toLong())
-                if (!hasLock) {
-                    if (i == 2) {
-                        throw PllNotLockedException()
-                    } else {
-                        println("Pll not locked after first attempt. Trying again. . .")
-                    }
-                }
-
-                writeRegMask(11, 16, 0x10)
-                writeRegMask(11, 0x00, 0x10)
-                writeRegMask(15, 0x00, 0x04)
-                val data = read(0x00, 5)
-                this.filCalCode = (data[4] and 0x0f).toInt()
-                if (this.filCalCode != 0x0f) {
-                    println("Fill code is ${this.filCalCode.toByte()} but should be 0x0f")
-                }
-            }
-            if (this.filCalCode == 0x0f)
-                this.filCalCode = 0
-        }
-        writeRegMask(0x00, filtQ or this.filCalCode, 0x1f)
-        writeRegMask(0x0b, hpCor, 0xef)
-        writeRegMask(0x07, imgR, 0x80)
-        writeRegMask(0x06, filtGain, 0x30)
-        writeRegMask(0x1e, extEnable, 0x60)
-        writeRegMask(0x05, loopThrough, 0x80)
-        writeRegMask(0x1f, ltAtt, 0x80)
-        writeRegMask(0x0f, fltExtWidest, 0x80)
-        writeRegMask(0x19, polyfilCur, 0x60)
-        this.bandwidth = bw.toLong()
-        this.delsys = R82xxDeliverySystem.values()[delsys.toInt()]
-        this.r82xxTunerType = r82xxTunerType
     }
 
     private fun sysFreqSelect(freq: Long) {
-        val flags = delsys!!.getFlags(freq)
-        flags.run {
-            if (config.usePreDetect)
-                writeRegMask(0x06, pre_dect, 0x40)
-            writeRegMask(0x1d, lna_top, 0xc7)
-            writeRegMask(0x1c, mixer_top, 0xf8)
-            writeReg(0x0d, lna_vth_l)
-            writeReg(0x0e, mixer_vth_l)
-            this@R82XX.input = air_cable1_in
-            writeRegMask(0x05, air_cable1_in, 0x60)
-            writeRegMask(0x06, cable2_in, 0x08)
-            writeRegMask(0x11, cp_cur, 0x38)
-            writeRegMask(0x17, div_buf_cur, 0x30)
-            writeRegMask(0x0a, filter_cur, 0x60)
-        }
 
-        writeRegMask(0x1d, 0, 0x38)
-        writeRegMask(0x1c, 0, 0x04)
-        writeRegMask(0x06, 0, 0x40)
-        writeRegMask(0x1a, 0x30, 0x30)
-        writeRegMask(0x1d, 0x18, 0x38)
-        writeRegMask(0x1c, flags.mixer_top, 0x04)
-        writeRegMask(0x1e, flags.lna_discharge, 0x1f)
-        writeRegMask(0x1a, 0x20, 0x30)
+        R82XXRegister.LNA_TOP2.write(0xE5)
+        var (mixerTop, cpCurrent, dividerBufferCurrent) = if (freq in listOf<Long>(506000000, 666000000, 818000000))
+            arrayOf(0x14, 0x28, 0x20)
+         else
+            arrayOf(0x24, 0x38, 0x30)
+        R82XXRegister.MIXER_TOP.write(mixerTop)
+        R82XXRegister.LNA_VTH.write(0x53)
+        R82XXRegister.MIXER_VTH.write(0x75)
+        R82XXRegister.AIR_CABLE1_INPUT.write(0x00)
+        R82XXRegister.CABLE2_INPUT.write(0x00)
+        R82XXRegister.CP_CURRENT.write(cpCurrent)
+        R82XXRegister.DIVIDER_BUFFER_CURRENT.write(dividerBufferCurrent)
+        R82XXRegister.FILTER_BUFFER_CURRENT.write(0x40)
+        R82XXRegister.LNA_TOP.write(0x00)
+        R82XXRegister.MIXER_TOP2.write(0x00)
+        R82XXRegister.PRE_DETECT.write(0x00)
+        R82XXRegister.AGC_CLOCK.write(0x30)
+        R82XXRegister.LNA_TOP2.write(mixerTop)
+        R82XXRegister.LNA_DISCHARGE_CURRENT.write(0x14)
+        R82XXRegister.AGC_CLOCK.write(0x20)
+
     }
 
+    @Synchronized
     override fun setFrequency(freq: Long) {
         lock.withLock {
             val loFreq = freq + this.ifFrequency
@@ -594,16 +469,13 @@ class R82XX constructor(
             val airCable1In = if (freq > 345.mhz()) 0x00 else 0x60
             if (config.rafaelChip == CHIP_R828D && airCable1In != input) {
                 input = airCable1In
-                writeRegMask(0x05, airCable1In, 0x60)
+                R82XXRegister.AIR_CABLE1_INPUT.write(airCable1In)
             }
             this.tunedFrequency = freq
             println("Set frequency to $freq")
         }
     }
 
-    override fun getTunedFrequency(): Long {
-        return this.tunedFrequency
-    }
 
     override fun setGain(manualGain: Boolean, gain: Int?) {
         if (manualGain) {
@@ -612,15 +484,11 @@ class R82XX constructor(
                 return
             }
 
+
             R82XXRegister.LNA_GAIN_AUTO.write(0x10)
             R82XXRegister.MIXER_AUTO_GAIN_ENABLED.write(0)
-            writeRegMask(0x05, 0x10, 0x10)
-            writeRegMask(0x07, 0, 0x10)
 
-            val data = read(0x00, 4)
-
-            writeRegMask(0x0c, 0x08, 0x9f)
-
+            R82XXRegister.VGA_GAIN.write(0x08)
             var totalGain = 0
             var mixIndex = 0
             var lnaIndex = 0
@@ -632,14 +500,11 @@ class R82XX constructor(
                 if (checkGain()) break
                 totalGain += MIXER_GAIN_STEPS[++mixIndex]
             }
-            writeRegMask(0x05, lnaIndex, 0x0f)
-            writeRegMask(0x07, mixIndex, 0x10)
+            R82XXRegister.LNA_GAIN.write(lnaIndex)
+            R82XXRegister.MIXER_GAIN_SETTINGS.write(mixIndex)
         } else {
             R82XXRegister.LNA_GAIN_AUTO.write(0)
             R82XXRegister.MIXER_AUTO_GAIN_ENABLED.write(0x10)
-            writeRegMask(0x05, 0, 0x10)
-            writeRegMask(0x07, 0x10, 0x10)
-            writeRegMask(0x0c, 0x0b, 0x9f)
             println("Automatic gain mode enabled.")
         }
     }
@@ -649,160 +514,12 @@ class R82XX constructor(
     }
 
     fun Reg.write(value: Int) {
-        this@R82XX.writeRegMask(this.address, value, mask)
-    }
-
-    sealed interface Reg {
-        val address: Int
-        val mask: Int
-    }
-
-    enum class R82XXRegister(override val address: Int, override val mask: Int) : Reg {
-
-        LOOP_THROUGH(0x05, 0x80),
-
-
-        /**
-         * LNA AGC control
-         * 0: Enable LNA auto gain mode (automatic)
-         * 0x10: Disable LNA auto gain mode (manual gain)
-         */
-        LNA_GAIN_AUTO(0x05, 0x10),
-
-        /**
-         * LNA gain power
-         * Used in combination with [LNA_GAIN] to control the LNA Gain setting
-         */
-        LNA_GAIN_POWER(0x05, 0x1f),
-
-        /**
-         *
-         */
-        LNA_GAIN(0x05, 0x0f),
-
-        FILTER_GAIN(0x06, 0x30),
-
-
-        IMAGE_REVERSE(0x07, 0x80),
-
-
-        MIXER_GAIN(0x07, 0x1F),
-
-        /**
-         * AGC for mixer
-         * 0: mixer AGC disabled (manual mode)
-         * 0x10: mixer AGC enabled (automatic gain mode_
-         */
-        MIXER_AUTO_GAIN_ENABLED(0x07, 0x10),
-
-        /**
-         *  Mixer gain level:
-         *  [MIXER_GAIN]
-         */
-        MIXER_GAIN_SETTINGS(0x07, 0x0f),
-
-        /**
-         * Mixer buffer power
-         * 0: off 1: on
-         */
-        MIXER_BUFFER_POWER(0x08, 0x3f),
-
-        FILTER_CALIBRATION_CODE(0x0A, 0x1F),
-
-        BANDWIDTH_FILTER_GAIN_HIGHPASS_FILTER_CORNER(0x0B, 0xEF),
-
-        CALIBRATION_TRIGGER(0x0B, 0x10),
-
-
-        FILTER_CAPACITOR(0x0B, 0x60),
-
-        /**
-         * Calibration clock
-         * 0x04: Enable
-         */
-        CALIBRATION_CLOCK(0x0F, 0x04),
-        FILTER_EXTENSION_WIDEST(0x0F, 0x80),
-
-
-
-
-        /**
-         * Mixer gain power
-         * Used in combination with [MIXER_GAIN] to control the mixer Gain setting
-         */
-
-        /**
-         * Open drain
-         * 0: High-Z 1: Low-Z
-         */
-        OPEN_D(0x17, 0x08),
-
-        RF_POLY_FILTER_CURRENT(0x19, 0x60),
-
-
-        /**
-         * Tracking filter switch
-         * 00: Tracking filter on
-         * 01: Bypass tracking filter
-         */
-        RFMUX(0x1a, 0xc3),
-
-        /**
-         * Internal xtal cap settings
-         * 00: no cap, 01: 10pF
-         * 10: 20pF, 11: 30pF
-         */
-        XTAL_CAP(0x10, 0x0b),
-
-        /**
-         * IF filter power
-         * 0: filter on
-         * 1: off
-         */
-        IF_FILTER_POWER(0x09, 0x3f),
-
-        /**
-         * PLL reference frequency divider
-         * 0: fref=xtal_freq
-         * 1: fref=xtal_freq / 2
-         */
-        PLL_REFDIV(0x10, 0x10),
-
-        XTAL_CHECK(0x0C, 0x0F),
-        /**
-         * PLL autotune clockrate
-         * 00: 128 khz
-         * 01: 32 khz
-         * 10: 8khz
-         */
-        PLL_AUTOTUNE_CLOCKRATE(0x1A, 0x0C),
-
-        VERSION(0x12, 0xE0),
-
-        /**
-         * ?
-         */
-        VCO_CURRENT(0x12, 0xE0),
-
-        TF_BAND(0x01b, 0x00),
-
-        /**
-         * Sets the amount of VGA gain. Used in combination with [VGA_GAIN]
-         */
-        VGA_GAIN(0x0C, 0x1f),
-
-        LNA_TOP(0x1D, 0x38),
-
-        LNA_TOP2(0x1D, 0xC7),
-
-        CHANNEL_FILTER_EXTENSION(0x1E, 0x60),
-
-        LOOP_THROUGH_ATTENUATION(0x1F, 0x80)
-
-
+        this@R82XX.writeReg(this, value.toByte())
     }
 
     companion object {
+        internal val regSet = mutableMapOf<Pair<Int, Int>, Reg>()
+
 
         //        private const val DIVIDER_0 =
 
