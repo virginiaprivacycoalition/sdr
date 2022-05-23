@@ -1,5 +1,6 @@
 package com.virginiaprivacy.sdr
 
+import com.virginiaprivacy.sdr.sample.SampleRate
 import kotlin.math.pow
 
 fun ByteArray.littleEndian2(bitsPerSample: Int): Int {
@@ -16,6 +17,8 @@ fun ByteArray.psd(bitsPerSample: Int): Double {
     val value = this.littleEndian2(bitsPerSample)
     return value / 2.0.pow(bitsPerSample.toDouble() - 1.0)
 }
+
+fun Number.toSampleRate(): SampleRate = SampleRate.getClosest(this.toInt())
 
 
 var debug = false

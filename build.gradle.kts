@@ -4,8 +4,8 @@ plugins {
     id("maven-publish")
 }
 
-group = "com.virginiaprivacycoalition"
-version = "2.0.2"
+group = "com.virginiaprivacy"
+version = "2.0.3"
 
 repositories {
     mavenCentral()
@@ -30,9 +30,9 @@ tasks.kotlinSourcesJar {
 publishing {
     publications {
         create<MavenPublication>("release") {
-            group = "com.virginiaprivacycoalition"
+            group = "com.virginiaprivacy"
             artifactId = "sdr"
-            version = "2.0.2"
+            version = "2.0.3"
             from(components["java"])
             artifact(tasks.kotlinSourcesJar)
         }
