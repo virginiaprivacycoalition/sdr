@@ -2,23 +2,20 @@ package com.virginiaprivacy.sdr.tuner
 
 import com.virginiaprivacy.sdr.exceptions.DeviceException
 import com.virginiaprivacy.sdr.exceptions.UsbException
-import com.virginiaprivacy.sdr.usb.Descriptor
 import com.virginiaprivacy.sdr.sample.SampleMode
 import com.virginiaprivacy.sdr.sample.SampleRate
+import com.virginiaprivacy.sdr.usb.Descriptor
 import com.virginiaprivacy.sdr.usb.UsbController
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.text.DecimalFormat
-import java.util.concurrent.atomic.AtomicInteger
 import kotlin.experimental.inv
 
-abstract class RTL2832TunerController(
+sealed class RTL2832TunerController(
     open val usbController: UsbController
 ) {
     var mSampleRate: SampleRate = DEFAULT_SAMPLE_RATE
-    private val mSampleCounter: AtomicInteger = AtomicInteger()
     private var mOscillatorFrequency: Int = 28800000
-    var mBufferSize: Int = 131072
     protected var mDescriptor: Descriptor? = null
     var devicePulled = false
 
@@ -545,6 +542,29 @@ abstract class RTL2832TunerController(
                 5 -> "TRANSFER NO DEVICE (5)"
                 6 -> "TRANSFER OVERFLOW (6)"
                 else -> "UNKNOWN TRANSFER STATUS ($status)"
+            }
+        }
+
+        @JvmStatic
+        fun getTunerController(usbController: UsbController): RTL2832TunerController {
+            if (!usbController.deviceOpened) {
+                usbController.open()
+            }
+            claimInterface(usbController)
+            writeRegister(usbController, Block.USB, Address.USB_SYSCTL.mAddress.toShort(), 9, 1)
+            initBaseband(usbController)
+            enableI2CRepeater(usbController, true)
+            val controlI2CRepeater = false
+            return when (val type = TunerTypeCheck.values().first { isTuner(it, usbController, controlI2CRepeater) }.tunerType) {
+                is R820TTunerType -> R820TTunerController(usbController, type).apply {
+                    releaseInterface(usbController)
+                    init()
+                }
+                is TunerType.ELONICS_E4000 -> E4KTunerController(usbController, type).apply {
+                    releaseInterface(usbController)
+                    init()
+                }
+                else -> throw DeviceException("Unknown tuner type")
             }
         }
     }

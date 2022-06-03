@@ -1,12 +1,9 @@
-package com.virginiaprivacy.sdr.tuner.e4k
+package com.virginiaprivacy.sdr.tuner
 
 import com.virginiaprivacy.sdr.exceptions.DeviceException
 import com.virginiaprivacy.sdr.exceptions.UsbException
 import com.virginiaprivacy.sdr.sample.SampleRate
-import com.virginiaprivacy.sdr.tuner.Address
-import com.virginiaprivacy.sdr.tuner.Block
-import com.virginiaprivacy.sdr.tuner.RTL2832TunerController
-import com.virginiaprivacy.sdr.tuner.TunerType
+import com.virginiaprivacy.sdr.tuner.e4k.*
 import com.virginiaprivacy.sdr.usb.Descriptor
 import com.virginiaprivacy.sdr.usb.UsbController
 import kotlin.experimental.inv
@@ -238,6 +235,8 @@ class E4KTunerController(override val usbController: UsbController, override val
     fun getLNAGain(controlI2CRepeater: Boolean): E4KLNAGain {
         return E4KLNAGain.fromRegisterValue(readE4KRegister(E4KLNAGain.register, controlI2CRepeater))
     }
+
+    fun getRSSI() = readE4KRegister(E4KRegister.AGC3, false)
 
     @kotlin.Throws(UsbException::class)
     fun setEnhanceGain(gain: E4KEnhanceGain?, controlI2CRepeater: Boolean) {
@@ -481,17 +480,6 @@ class E4KTunerController(override val usbController: UsbController, override val
             value,
             controlI2CRepeater
         )
-    }
-
-    enum class AGCMode(val value: Byte) {
-        SERIAL(0.toByte()), IF_PWM_LNA_SERIAL(1.toByte()), IF_PWM_LNA_AUTONL(2.toByte()), IF_PWM_LNA_SUPERV(3.toByte()), IF_SERIAL_LNA_PWM(
-            4.toByte()
-        ),
-        IF_PWM_LNA_PWM(5.toByte()), IF_DIG_LNA_SERIAL(6.toByte()), IF_DIG_LNA_AUTON(7.toByte()), IF_DIG_LNA_SUPERV(8.toByte()), IF_SERIAL_LNA_AUTON(
-            9.toByte()
-        ),
-        IF_SERIAL_LNA_SUPERV(10.toByte());
-
     }
 
     enum class Band(val mValue: Int) {

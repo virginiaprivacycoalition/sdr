@@ -17,7 +17,7 @@ abstract class UsbController: Closeable {
 
     abstract var deviceOpened: Boolean
 
-    private lateinit var controller: RTL2832TunerController
+    open lateinit var controller: RTL2832TunerController
 
 
     @Throws(DeviceException::class)
@@ -27,7 +27,7 @@ abstract class UsbController: Closeable {
      * @throws DeviceException
      * @throws UsbException
      */
-    internal abstract fun open()
+    abstract fun open()
 
     abstract override fun close()
 
@@ -38,10 +38,10 @@ abstract class UsbController: Closeable {
      * @return returns the number of bytes transferred by the control transfer.
      * @throws UsbException if there was an error performing the transfer
      */
-    internal abstract fun write(value: Short, index: Short, buffer: ByteBuffer): Int
+    abstract fun write(value: Short, index: Short, buffer: ByteBuffer): Int
 
     @Throws(UsbException::class)
-    abstract fun <T> start(): ReceiveChannel<T>
+    abstract fun start(): ReceiveChannel<*>
 
     abstract fun stop()
 
@@ -52,7 +52,7 @@ abstract class UsbController: Closeable {
      * @return returns the number of bytes transferred by the control transfer.
      * @throws UsbException if there was an error performing the transfer
      */
-    internal abstract fun read(address: Short, index: Short, buffer: ByteBuffer): Int
+    abstract fun read(address: Short, index: Short, buffer: ByteBuffer): Int
 
     @Throws(UsbException::class)
     /**
@@ -60,25 +60,25 @@ abstract class UsbController: Closeable {
      * @return return 0 if the interface was successfully claimed, otherwise return the error code that will be used to
      * get the correct error message with [getErrorMessage]
      */
-    internal abstract fun claimInterface(interfaceNumber: Int): Int
+    abstract fun claimInterface(interfaceNumber: Int): Int
 
     @Throws(UsbException::class)
-    internal abstract fun releaseInterface(interfaceNumber: Int): Int
+    abstract fun releaseInterface(interfaceNumber: Int): Int
 
     @Throws(DeviceException::class)
-    internal abstract fun release(interfaceNumber: Int): Int
+    abstract fun release(interfaceNumber: Int): Int
 
     @Throws(DeviceException::class)
-    internal abstract fun kernelDriverActive(interfaceNumber: Int): Boolean
+    abstract fun kernelDriverActive(interfaceNumber: Int): Boolean
 
     @Throws(DeviceException::class)
-    internal abstract fun detachKernelDriver(interfaceNumber: Int)
+    abstract fun detachKernelDriver(interfaceNumber: Int)
 
-    internal abstract fun getErrorMessage(errorCode: Int): String
+    abstract fun getErrorMessage(errorCode: Int): String
 
-    internal abstract fun handleEventsTimeout(): Int
+    abstract fun handleEventsTimeout(): Int
 
-    internal abstract fun resetDevice()
+    abstract fun resetDevice()
 
     open fun setSampleRate(rate: SampleRate) {
         controller.setSampleRate(rate)

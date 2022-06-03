@@ -1,15 +1,12 @@
-package com.virginiaprivacy.sdr.tuner.r820t
+package com.virginiaprivacy.sdr.tuner
 
 import com.virginiaprivacy.sdr.exceptions.DeviceException
 import com.virginiaprivacy.sdr.exceptions.UsbException
 import com.virginiaprivacy.sdr.sample.SampleMode
 import com.virginiaprivacy.sdr.sample.SampleRate
-import com.virginiaprivacy.sdr.tuner.Block
-import com.virginiaprivacy.sdr.tuner.Page
-import com.virginiaprivacy.sdr.tuner.RTL2832TunerController
-import com.virginiaprivacy.sdr.tuner.TunerType
 import com.virginiaprivacy.sdr.FrequencyDivider
 import com.virginiaprivacy.sdr.FrequencyRange
+import com.virginiaprivacy.sdr.tuner.r820t.*
 import com.virginiaprivacy.sdr.usb.UsbController
 import java.nio.ByteBuffer
 

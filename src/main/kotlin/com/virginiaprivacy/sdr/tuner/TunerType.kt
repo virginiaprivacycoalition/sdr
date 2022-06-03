@@ -2,27 +2,27 @@ package com.virginiaprivacy.sdr.tuner
 
 sealed interface Tuner
 sealed interface R820TTunerType
-sealed class TunerType(val label: String) : Tuner {
-    object AIRSPY_R820T : TunerType("Airspy R820T")
-    object ELONICS_E4000 : TunerType("E4000")
-    object ETTUS_WBX : TunerType("WBX")
-    object ETTUS_VARIOUS : TunerType("Ettus Tuner")
-    object FCI_FC2580 : TunerType("FC2580")
+sealed class TunerType(val label: String, val tunerClass: Class<*>) : Tuner {
+    object AIRSPY_R820T : TunerType("Airspy R820T", R820TTunerController::class.java)
+    object ELONICS_E4000 : TunerType("E4000", E4KTunerController::class.java)
+    object ETTUS_WBX : TunerType("WBX", RTL2832TunerController::class.java)
+    object ETTUS_VARIOUS : TunerType("Ettus Tuner", RTL2832TunerController::class.java)
+    object FCI_FC2580 : TunerType("FC2580", RTL2832TunerController::class.java)
     object FITIPOWER_FC0012 : TunerType(
         "FC0012"
-    )
+        , RTL2832TunerController::class.java)
 
-    object FITIPOWER_FC0013 : TunerType("FC0013")
-    object FUNCUBE_DONGLE_PRO : TunerType("Funcube Dongle Pro")
-    object FUNCUBE_DONGLE_PRO_PLUS : TunerType("Funcube Dongle Pro Plus")
+    object FITIPOWER_FC0013 : TunerType("FC0013", RTL2832TunerController::class.java)
+    object FUNCUBE_DONGLE_PRO : TunerType("Funcube Dongle Pro", RTL2832TunerController::class.java)
+    object FUNCUBE_DONGLE_PRO_PLUS : TunerType("Funcube Dongle Pro Plus", RTL2832TunerController::class.java)
     object HACKRF : TunerType(
         "HackRF"
-    )
+        , RTL2832TunerController::class.java)
 
-    object RAFAELMICRO_R820T : TunerType("R820T"), R820TTunerType
-    object RAFAELMICRO_R828D : TunerType("R828D"), R820TTunerType
-    object RTL2832_VARIOUS : TunerType("Generic"), R820TTunerType
-    object UNKNOWN : TunerType("Unknown")
+    object RAFAELMICRO_R820T : TunerType("R820T", R820TTunerController::class.java), R820TTunerType
+    object RAFAELMICRO_R828D : TunerType("R828D", R820TTunerController::class.java), R820TTunerType
+    object RTL2832_VARIOUS : TunerType("Generic", RTL2832TunerController::class.java), R820TTunerType
+    object UNKNOWN : TunerType("Unknown", RTL2832TunerController::class.java)
     companion object {
         fun values(): Array<TunerType> {
             return arrayOf(
