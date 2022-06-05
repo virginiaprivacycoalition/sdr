@@ -51,7 +51,7 @@ class E4KTunerController(override val usbController: UsbController, override val
     }
 
     @kotlin.Throws(DeviceException::class)
-    override fun setSampleRateFilters(bandwidth: Int) {
+    fun setSampleRateFilters(bandwidth: Int) {
         val i2CRepeaterEnabled = this.isI2CRepeaterEnabled
         if (!i2CRepeaterEnabled) {
             enableI2CRepeater(usbController, true)
@@ -66,6 +66,11 @@ class E4KTunerController(override val usbController: UsbController, override val
         if (!i2CRepeaterEnabled) {
             enableI2CRepeater(usbController, false)
         }
+    }
+
+    override fun setSampleRate(sampleRate: SampleRate) {
+        super.setSampleRate(sampleRate)
+        setSampleRateFilters(sampleRate.rate)
     }
 
     @get:kotlin.Throws(DeviceException::class)
@@ -162,6 +167,23 @@ class E4KTunerController(override val usbController: UsbController, override val
         if (controlI2CRepeater) {
             enableI2CRepeater(usbController, false)
         }
+    }
+
+    override fun setGain(level: TunerGain) {
+        setLNAGain(level)
+        setMixerGain(level)
+    }
+
+    override fun setLNAGain(level: TunerGain) {
+        val values = E4KLNAGain.values()
+        val newIndex = (level.value / 10) * values.size
+        setLNAGain(values[newIndex], false)
+    }
+
+    override fun setMixerGain(level: TunerGain) {
+        val values = E4KMixerGain.values()
+        val newIndex = (level.value / 10) * values.size
+        setMixerGain(values[newIndex], false)
     }
 
     @kotlin.Throws(UsbException::class)

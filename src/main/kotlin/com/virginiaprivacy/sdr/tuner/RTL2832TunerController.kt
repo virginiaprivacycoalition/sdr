@@ -97,8 +97,11 @@ sealed class RTL2832TunerController(
             "SER#$serial"
         }
 
-    @kotlin.Throws(DeviceException::class)
-    abstract fun setSampleRateFilters(bandwidth: Int)
+    abstract fun setGain(level: TunerGain)
+
+    abstract fun setLNAGain(level: TunerGain)
+
+    abstract fun setMixerGain(level: TunerGain)
 
     abstract val tunerType: TunerType?
 
@@ -174,13 +177,13 @@ sealed class RTL2832TunerController(
         }
 
     @kotlin.Throws(DeviceException::class)
-    fun setSampleRate(sampleRate: SampleRate) {
+    open fun setSampleRate(sampleRate: SampleRate) {
         writeDemodRegister(usbController, Page.ONE, 159.toShort(), sampleRate.ratioHighBits, 2)
         writeDemodRegister(usbController, Page.ONE, 161.toShort(), 0, 2)
         sampleRateFrequencyCorrection = 0
         writeDemodRegister(usbController, Page.ONE, 1.toShort(), 20, 1)
         writeDemodRegister(usbController, Page.ONE, 1.toShort(), 16, 1)
-        setSampleRateFilters(sampleRate.rate)
+        //setSampleRateFilters(sampleRate.rate)
         mSampleRate = sampleRate
     }
 

@@ -51,11 +51,6 @@ class R820TTunerController(
         192
     )
 
-
-    @kotlin.Throws(UsbException::class)
-    override fun setSampleRateFilters(bandwidth: Int) {
-    }
-
     @get:kotlin.Throws(DeviceException::class)
     @set:kotlin.Throws(DeviceException::class)
     private var _tunedFrequency: Long = 0L
@@ -121,6 +116,30 @@ class R820TTunerController(
         initializeRegisters(controlI2C)
         setTVStandard(controlI2C)
         systemFrequencySelect(0L, controlI2C)
+    }
+
+    override fun setGain(level: TunerGain) {
+        setLNAGain(level)
+        setMixerGain(level)
+        setVGAGain(level)
+    }
+
+    override fun setLNAGain(level: TunerGain) {
+        val values = R820TLNAGain.values()
+        val newIndex = (level.value / 10) * values.size
+        setLNAGain(values[newIndex], false)
+    }
+
+    override fun setMixerGain(level: TunerGain) {
+        val values = R820TMixerGain.values()
+        val newIndex = (level.value / 10) * values.size
+        setMixerGain(values[newIndex], false)
+    }
+
+    fun setVGAGain(level: TunerGain) {
+        val values = R820TVGAGain.values()
+        val newIndex = (level.value / 10) * values.size
+        setVGAGain(values[newIndex], false)
     }
 
     @kotlin.Throws(UsbException::class)

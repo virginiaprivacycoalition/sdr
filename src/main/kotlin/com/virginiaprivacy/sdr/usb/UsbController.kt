@@ -5,6 +5,7 @@ import com.virginiaprivacy.sdr.exceptions.UsbException
 import com.virginiaprivacy.sdr.sample.SampleRate
 import com.virginiaprivacy.sdr.toSampleRate
 import com.virginiaprivacy.sdr.tuner.RTL2832TunerController
+import com.virginiaprivacy.sdr.tuner.TunerGain
 import kotlinx.coroutines.channels.ReceiveChannel
 import java.io.Closeable
 import java.nio.ByteBuffer
@@ -79,6 +80,10 @@ abstract class UsbController: Closeable {
     abstract fun handleEventsTimeout(): Int
 
     abstract fun resetDevice()
+
+    open fun setGain(level: TunerGain) {
+        controller.setGain(level)
+    }
 
     open fun setSampleRate(rate: SampleRate) {
         controller.setSampleRate(rate)
