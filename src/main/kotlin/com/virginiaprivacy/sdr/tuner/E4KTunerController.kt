@@ -176,14 +176,14 @@ class E4KTunerController(override val usbController: UsbController, override val
 
     override fun setLNAGain(level: TunerGain) {
         val values = E4KLNAGain.values()
-        val newIndex = (level.value / 10) * values.size
-        setLNAGain(values[newIndex], false)
+        val newIndex = (level.value / TunerGain.values().size) * values.size
+        setLNAGain(values[newIndex], true)
     }
 
     override fun setMixerGain(level: TunerGain) {
         val values = E4KMixerGain.values()
-        val newIndex = (level.value / 10) * values.size
-        setMixerGain(values[newIndex], false)
+        val newIndex = (level.value / TunerGain.values().size) * values.size
+        setMixerGain(values[newIndex], true)
     }
 
     @kotlin.Throws(UsbException::class)

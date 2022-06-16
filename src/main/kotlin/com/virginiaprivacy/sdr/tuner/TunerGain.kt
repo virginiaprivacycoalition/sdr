@@ -12,4 +12,8 @@ sealed class TunerGain(val value: Int) {
     object GainLevel8 : TunerGain(8)
     object GainLevel9 : TunerGain(9)
     object GainLevel10 : TunerGain(10)
+
+    companion object {
+        fun values() = listOf(AutomaticGain, GainLevel1, GainLevel2, GainLevel3, GainLevel4, GainLevel5, GainLevel6, GainLevel7, GainLevel8, GainLevel9, GainLevel10, )
+    }
 }

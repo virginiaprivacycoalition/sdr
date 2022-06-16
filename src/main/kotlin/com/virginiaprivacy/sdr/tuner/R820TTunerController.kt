@@ -126,20 +126,20 @@ class R820TTunerController(
 
     override fun setLNAGain(level: TunerGain) {
         val values = R820TLNAGain.values()
-        val newIndex = (level.value / 10) * values.size
-        setLNAGain(values[newIndex], false)
+        val newIndex = (level.value / TunerGain.values().size) * values.size
+        setLNAGain(values[newIndex], true)
     }
 
     override fun setMixerGain(level: TunerGain) {
         val values = R820TMixerGain.values()
-        val newIndex = (level.value / 10) * values.size
-        setMixerGain(values[newIndex], false)
+        val newIndex = (level.value / TunerGain.values().size) * values.size
+        setMixerGain(values[newIndex], true)
     }
 
     fun setVGAGain(level: TunerGain) {
         val values = R820TVGAGain.values()
-        val newIndex = (level.value / 10) * values.size
-        setVGAGain(values[newIndex], false)
+        val newIndex = (level.value / TunerGain.values().size) * values.size
+        setVGAGain(values[newIndex], true)
     }
 
     @kotlin.Throws(UsbException::class)
