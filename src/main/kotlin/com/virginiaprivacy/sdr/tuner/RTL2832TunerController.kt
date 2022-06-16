@@ -15,6 +15,7 @@ sealed class RTL2832TunerController(
     open val usbController: UsbController
 ) {
     var mSampleRate: SampleRate = DEFAULT_SAMPLE_RATE
+    var sampleRateInt = 0
     private var mOscillatorFrequency: Int = 28800000
     protected var mDescriptor: Descriptor? = null
     var devicePulled = false
@@ -155,7 +156,18 @@ sealed class RTL2832TunerController(
 
     @get:kotlin.Throws(DeviceException::class)
     val currentSampleRate: Int
-        get() = mSampleRate.rate
+        get() = sampleRateInt
+
+    private var mAgcMode: Boolean = false
+
+    open var agcMode: Boolean
+        get() = mAgcMode
+        set(value) {
+            if (mAgcMode != value) {
+                writeDemodRegister(usbController, Page.ZERO, 0x19, if (value) 0x25 else 0x05, 1)
+                mAgcMode = value
+            }
+        }
 
     @get:kotlin.Throws(DeviceException::class)
     val sampleRateFromTuner: Int
@@ -176,14 +188,59 @@ sealed class RTL2832TunerController(
             return DEFAULT_SAMPLE_RATE.rate
         }
 
+
+
+    @Throws(DeviceException::class)
+    open fun setSampleRate(rate: Int) {
+        var r = 0
+        var sampleRatio = (this.mOscillatorFrequency * TWO_TO_22_POWER) / rate.toLong()
+        sampleRatio = sampleRatio and 0x0fffffffc
+        val realRsampRatio = sampleRatio or ((sampleRatio and 0x080000000) shl 1)
+        val realRate = (mOscillatorFrequency * TWO_TO_22_POWER) / realRsampRatio
+        if (realRate.toInt() != rate) {
+            println("Exact sample rate is ${String.format("%f", realRate)}")
+        }
+//        if (dev->tuner && dev->tuner->set_bw) {
+//            rtlsdr_set_i2c_repeater(dev, 1);
+//            dev->tuner->set_bw(dev, dev->bw > 0 ? dev->bw : dev->rate);
+//            rtlsdr_set_i2c_repeater(dev, 0);
+//        }
+        var tmp = (realRsampRatio shr 16).toInt()
+        writeDemodRegister(this.usbController, Page.ONE, 0x9f, tmp, 2)
+        tmp = (realRsampRatio and 0xffff).toInt()
+        writeDemodRegister(usbController, Page.ONE, 0xa1, tmp, 2)
+        sampleRateFrequencyCorrection = 0
+        // reset demod (bit 3, soft reset)
+        writeDemodRegister(usbController, Page.ONE, 0x01, 0x14, 1)
+        writeDemodRegister(usbController, Page.ONE, 0x01, 0x10, 1)
+
+        sampleRateInt = rate
+    }
+
     @kotlin.Throws(DeviceException::class)
+    @Deprecated("Set sample rate with an int for more flexibility.")
     open fun setSampleRate(sampleRate: SampleRate) {
+        var r = 0
+        var sampleRatio = (this.mOscillatorFrequency * TWO_TO_22_POWER) / sampleRate.rate.toLong()
+        sampleRatio = sampleRatio and 0x0fffffffc
+        val realRsampRatio = sampleRatio or ((sampleRatio and 0x080000000) shl 1)
+        val realRate = (mOscillatorFrequency * TWO_TO_22_POWER) / realRsampRatio
+//        if (dev->tuner && dev->tuner->set_bw) {
+//            rtlsdr_set_i2c_repeater(dev, 1);
+//            dev->tuner->set_bw(dev, dev->bw > 0 ? dev->bw : dev->rate);
+//            rtlsdr_set_i2c_repeater(dev, 0);
+//        }
+        var tmp = (realRsampRatio shr 16).toInt()
+        writeDemodRegister(this.usbController, Page.ONE, 0x9f, tmp, 2)
+        tmp = (realRsampRatio and 0xffff).toInt()
+        writeDemodRegister(usbController, Page.ONE, 0xa1, tmp, 2)
         writeDemodRegister(usbController, Page.ONE, 159.toShort(), sampleRate.ratioHighBits, 2)
         writeDemodRegister(usbController, Page.ONE, 161.toShort(), 0, 2)
         sampleRateFrequencyCorrection = 0
-        writeDemodRegister(usbController, Page.ONE, 1.toShort(), 20, 1)
-        writeDemodRegister(usbController, Page.ONE, 1.toShort(), 16, 1)
-        //setSampleRateFilters(sampleRate.rate)
+        // reset demod (bit 3, soft reset)
+        writeDemodRegister(usbController, Page.ONE, 0x01, 0x14, 1)
+        writeDemodRegister(usbController, Page.ONE, 0x01, 0x10, 1)
+
         mSampleRate = sampleRate
     }
 

@@ -1,5 +1,6 @@
 package com.virginiaprivacy.sdr.usb
 
+import com.virginiaprivacy.sdr.adapters.ISampleAdapter
 import com.virginiaprivacy.sdr.exceptions.DeviceException
 import com.virginiaprivacy.sdr.exceptions.UsbException
 import com.virginiaprivacy.sdr.sample.SampleRate
@@ -20,6 +21,7 @@ abstract class UsbController: Closeable {
 
     open lateinit var controller: RTL2832TunerController
 
+     abstract var sampleAdapter: ISampleAdapter<*>
 
     @Throws(DeviceException::class)
     /**
