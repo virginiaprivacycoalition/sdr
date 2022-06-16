@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "com.virginiaprivacy"
-version = "2.0.9"
+version = "2.0.10"
 
 repositories {
     mavenCentral()
@@ -32,7 +32,7 @@ publishing {
         create<MavenPublication>("release") {
             group = "com.virginiaprivacy"
             artifactId = "sdr"
-            version = "2.0.9"
+            version = "2.0.10"
             from(components["java"])
             artifact(tasks.kotlinSourcesJar)
         }
